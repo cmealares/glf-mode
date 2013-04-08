@@ -122,8 +122,8 @@
 
 (defconst glf-background-colors
   '("cornsilk"
-    "lavender"
     "misty rose"
+    "lavender"
     "lemon chiffon"
     "seashell"
     "sky blue"
@@ -366,7 +366,6 @@
         (let
             ((start-pos (search-forward separator (line-end-position) t (1+ index)))
              (end-pos (search-forward separator (line-end-position) t 1)))
-
           (if (null start-pos)
               nil
             (buffer-substring-no-properties start-pos
@@ -407,6 +406,7 @@
     (forward-line -1)))
 
 ;;??glf-beginning-of-record
+
 ;;??glf-end-of-record
 
 (defun glf-forward-paragraph ()
@@ -425,15 +425,18 @@
   (interactive)
   (glf-backward-infoline)
   (let ((tid (glf-read-column "ThreadID")))
-    (while (and (not (eobp))
+    (while (and (not (bobp))
                 (equal tid (glf-read-column "ThreadID")))
       (glf-backward-infoline))
     (glf-forward-infoline)
     (message (format "Reached beginning of thread %s" tid))))
 
 ;;??glf-forward-record
+
 ;;??glf-backward-record
+
 ;;??glf-forward-thread
+
 ;;??glf-backward-thread
 
 ;;;
