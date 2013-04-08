@@ -138,7 +138,7 @@
     "dark sea green"
     "khaki"
     "tan"
-    "rosi brown"
+    "rosy brown"
     "plum"
     "pink")
   "Colors for backgrounds of threads.")
@@ -150,10 +150,10 @@
              (facename (make-symbol (concat "glf-" (subst-char-in-string ?\s ?- color) "-face")))
              (face (make-face facename)))
         (when (not (face-background face))
-	  (setq glf-next-background-color (1+ glf-next-background-color))
-	  (when (>= glf-next-background-color (length glf-background-colors))
-	    (setq glf-next-background-color 0))
-	  (set-face-background face color))
+          (setq glf-next-background-color (1+ glf-next-background-color))
+          (when (>= glf-next-background-color (length glf-background-colors))
+            (setq glf-next-background-color 0))
+          (set-face-background face color))
         (puthash tid face glf-thread-faces-map))))
 
 (defun glf-get-current-thread-face ()
@@ -168,19 +168,19 @@
 (defun glf-compute-font-lock-column-specification ()
   (let
       ((colspec '(("Time" . glf-column-time-face)
-		  ("Importance" . nil)
-		  ("Severity" . nil)
-		  ("Exception" . nil)
-		  ("ProcessID" . glf-column-process-id-face)
-		  ("ThreadID" . glf-column-thread-id-face)
-		  ("ScopeTag" . glf-column-scope-tag-face)
-		  ("Text" . (glf-get-current-thread-face)) ))
+                  ("Importance" . nil)
+                  ("Severity" . nil)
+                  ("Exception" . nil)
+                  ("ProcessID" . glf-column-process-id-face)
+                  ("ThreadID" . glf-column-thread-id-face)
+                  ("ScopeTag" . glf-column-scope-tag-face)
+                  ("Text" . (glf-get-current-thread-face)) ))
        (lockspec '()))
 
     (dolist (column glf-columns)
       (let ((def (assoc column colspec)))
-	(push (if (null def) :invisible (cdr def))
-	      lockspec)))
+        (push (if (null def) :invisible (cdr def))
+              lockspec)))
 
     (setq lockspec (nreverse lockspec))
     (glf-group-columns (car lockspec) 1 (cdr lockspec))))
@@ -190,45 +190,45 @@
    ((null list)
     (list (cons count element)))
    ((and (equal element (car list))
-	 (or (null (car list))
-	     (eq :invisible (car list))))
+         (or (null (car list))
+             (eq :invisible (car list))))
     (glf-group-columns element (1+ count) (cdr list)))
    (t
     (cons (cons count element)
-	  (glf-group-columns (car list) 1 (cdr list))))))
+          (glf-group-columns (car list) 1 (cdr list))))))
 
 (defun glf-compute-thread-match-data-index ()
   "Give the number of the match data of the ThreadID column. This column must exist."
   (let ((tidIndex (gethash "ThreadID" glf-column-indexes-map))
-	(i 0)
-	(colspec glf-font-lock-column-specification))
+        (i 0)
+        (colspec glf-font-lock-column-specification))
 
     (if (not tidIndex)
-	(error "Unknown column name: ThreadIndex")
+        (error "Unknown column name: ThreadIndex")
 
       (while (and colspec
-		  (> tidIndex 0))
+                  (> tidIndex 0))
 
-	(let ((colCount (caar colspec)))
-	  (setq tidIndex (- tidIndex colCount))
-	  (setq i (1+ i))
-	  (setq colspec (cdr colspec))) )
+        (let ((colCount (caar colspec)))
+          (setq tidIndex (- tidIndex colCount))
+          (setq i (1+ i))
+          (setq colspec (cdr colspec))) )
       i)))
 
 (defun glf-compute-font-lock-column-faces ()
   (let ((res nil)
-	(index 1))
+        (index 1))
 
     (dolist (spec glf-font-lock-column-specification (nreverse res))
       (let ((font (cdr spec))
-	    (invisible-face '(list 'face 'default 'invisible t))
-	    ;;(invisible-face 'glf-light-text-face)
-	    )
-	(when font
-	  (setq res (cons (list index
-				(if (eq font :invisible) invisible-face font))
-			  res))
-	  (setq index (1+ index)))))))
+            (invisible-face '(list 'face 'default 'invisible t))
+            ;;(invisible-face 'glf-light-text-face)
+            )
+        (when font
+          (setq res (cons (list index
+                                (if (eq font :invisible) invisible-face font))
+                          res))
+          (setq index (1+ index)))))))
 
 (defun glf-column-matcher (search-limit)
   (let
@@ -242,15 +242,15 @@
       nil
     (catch 'badmatch
       (let ((matchlist (list search-limit (point))))
-	(dolist (spec speclist)
-	  (let* ((count (car spec))
-		 (face (cdr spec))
-		 (match (if (null face)
-			    (skip-column search-limit count)
-			  (search-column search-limit count (eq face :invisible)))))
-	    (when match
-	      (setq matchlist (cons (cadr match) (cons (car match) matchlist))))))
-	(nreverse matchlist)))))
+        (dolist (spec speclist)
+          (let* ((count (car spec))
+                 (face (cdr spec))
+                 (match (if (null face)
+                            (skip-column search-limit count)
+                          (search-column search-limit count (eq face :invisible)))))
+            (when match
+              (setq matchlist (cons (cadr match) (cons (car match) matchlist))))))
+        (nreverse matchlist)))))
 
 (defun search-column (search-limit count isInvisible)
   (let
@@ -270,7 +270,7 @@
 
      ;; Location
      (if (eq glf-default-location-visibility-mode 'grayed-out)
-	 (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
+         (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
        (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
 
      ; Columns
@@ -291,16 +291,16 @@
     (goto-char (point-min))
     (when (looking-at-p "FILE_TYPE:")
       (while (not (looking-at-p "HEADER_END"))
-	(if (looking-at "\\([A-Z_]+\\):\\(.*\\)")
-	    (let ((name (match-string-no-properties 1))
-		  (value (match-string-no-properties 2)))
-	      (setq header-alist (cons (cons name value) header-alist))
-	      (forward-line) ))))
+        (if (looking-at "\\([A-Z_]+\\):\\(.*\\)")
+            (let ((name (match-string-no-properties 1))
+                  (value (match-string-no-properties 2)))
+              (setq header-alist (cons (cons name value) header-alist))
+              (forward-line) ))))
     header-alist))
 
 (defun glf-get-header-value (name type alist default &optional column-separator)
   (let* ((def (assoc name alist))
-	 (strval  (when def (cdr def))))
+         (strval  (when def (cdr def))))
     (cond
      ((eq type :string) (if (null strval) default strval))
      ((eq type :char)  (if (null strval) default (string-to-number strval)))
@@ -312,9 +312,9 @@
     (let ((header (glf-read-header-alist)))
 
       (set (make-local-variable 'glf-end-of-header-point)
-	   (if header
-	       (progn (forward-line)) (point)
-	       (point-min)))
+           (if header
+               (progn (forward-line)) (point)
+               (point-min)))
 
       (set (make-local-variable 'glf-file-type) (glf-get-header-value "FILE_TYPE" :string header nil))
       (set (make-local-variable 'glf-file-encoding) (glf-get-header-value "ENCODING" :string header "UTF-8"))
@@ -326,9 +326,9 @@
       (set (make-local-variable 'glf-columns) (cdr (glf-get-header-value "COLUMNS" :list header '() glf-column-separator)))
 
       (let ((nb-columns (length glf-columns)))
-	(set (make-local-variable 'glf-column-indexes-map) (make-hash-table :test 'equal :weakness t :size nb-columns))
-	(dotimes (i nb-columns)
-	  (puthash (nth i glf-columns) i glf-column-indexes-map))) )))
+        (set (make-local-variable 'glf-column-indexes-map) (make-hash-table :test 'equal :weakness t :size nb-columns))
+        (dotimes (i nb-columns)
+          (puthash (nth i glf-columns) i glf-column-indexes-map))) )))
 
 (defun glf-test ()
   "Print the result of some reading functions"
@@ -351,9 +351,30 @@
 ;;; Movements
 ;;;
 
+(defun glf-read-column (name)
+  "Read column value on current line"
+  (save-excursion
+    (beginning-of-line)
+    (unless (eq (char-after) glf-column-separator)
+      (forward-line 1))
+
+    (let ((index (gethash name glf-column-indexes-map))
+          (separator (format "%c" glf-column-separator)))
+      (if (null index)
+          (error "Unknown column name: %s" name)
+
+        (let
+            ((start-pos (search-forward separator (line-end-position) t (1+ index)))
+             (end-pos (search-forward separator (line-end-position) t 1)))
+
+          (if (null start-pos)
+              nil
+            (buffer-substring-no-properties start-pos
+                                            (1- (if (null end-pos) (line-end-position) end-pos)))) )))))
+
 (defun glf-search-error (search-fun)
   (unless (apply search-fun
-		 (list (format "%c[AEX]%c" glf-column-separator glf-column-separator) nil t))
+                 (list (format "%c[AEX]%c" glf-column-separator glf-column-separator) nil t))
     (message "No more error")))
 
 (defun glf-next-error ()
@@ -367,12 +388,53 @@
   (glf-search-error 're-search-backward))
 
 
+;;?? glf-goto-file
 
+(defun glf-forward-infoline ()
+  "Move to next infoline"
+  (beginning-of-line)
+  (forward-line)
+  (while (and (not (eobp))
+              (not (looking-at glf-infoline-pattern)))
+    (forward-line)))
 
+(defun glf-backward-infoline ()
+  "Move to previous infoline"
+  (beginning-of-line)
+  (forward-line -1)
+  (while (and (not (bobp))
+              (not (looking-at glf-infoline-pattern)))
+    (forward-line -1)))
 
+;;??glf-beginning-of-record
+;;??glf-end-of-record
 
+(defun glf-forward-paragraph ()
+  "Move to next thread paragraph."
+  (interactive)
+  (glf-forward-infoline)
+  (let ((tid (glf-read-column "ThreadID")))
+    (while (and (not (eobp))
+                (equal tid (glf-read-column "ThreadID")))
+      (glf-forward-infoline))
+    (glf-backward-infoline)
+    (message (format "Reached end of thread %s" tid))))
 
+(defun glf-backward-paragraph ()
+  "Move to previous thread paragraph."
+  (interactive)
+  (glf-backward-infoline)
+  (let ((tid (glf-read-column "ThreadID")))
+    (while (and (not (eobp))
+                (equal tid (glf-read-column "ThreadID")))
+      (glf-backward-infoline))
+    (glf-forward-infoline)
+    (message (format "Reached beginning of thread %s" tid))))
 
+;;??glf-forward-record
+;;??glf-backward-record
+;;??glf-forward-thread
+;;??glf-backward-thread
 
 ;;;
 ;;; keymap
@@ -380,27 +442,27 @@
 
 (defvar glf-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "<C-next>")	'glf-next-error)
-    (define-key map (kbd "<C-prior>")	'glf-previous-error)
-;;    (define-key map (kbd "C-c RET")	'glf-goto-file)
+    (define-key map (kbd "<C-next>")    'glf-next-error)
+    (define-key map (kbd "<C-prior>")   'glf-previous-error)
+    (define-key map (kbd "C-c RET")     'glf-goto-file)
 ;;
 ;;    ;; open xml trace file
 ;;    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
 ;;    (define-key map (kbd "C-c C-y")     'glf-return-find-file-other-window)
 ;;    (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
+
+    (define-key map (kbd "<C-down>")    'glf-forward-paragraph)
+    (define-key map (kbd "<C-up>")      'glf-backward-paragraph)
+
+    (define-key map (kbd "<M-down>")    'glf-forward-thread)
+    (define-key map (kbd "<M-up>")      'glf-backward-thread)
 ;;
-;;    (define-key map (kbd "<C-down>")	'glf-forward-paragraph)
-;;    (define-key map (kbd "<C-up>")	'glf-backward-paragraph)
+;;    (define-key map (kbd "C-c C-f")   'glf-thread-focus)
+;;    (define-key map (kbd "C-c C-u")   'glf-thread-unfocus)
 ;;
-;;    (define-key map (kbd "<M-down>")	'glf-forward-thread)
-;;    (define-key map (kbd "<M-up>")	'glf-backward-thread)
-;;
-;;    (define-key map (kbd "C-c C-f")	'glf-thread-focus)
-;;    (define-key map (kbd "C-c C-u")	'glf-thread-unfocus)
-;;
-;;    (define-key map (kbd "C-c C-t")	'glf-toggle-truncate-lines)
-;;    (define-key map (kbd "C-c S")	'glf-errors-summary)
-;;    (define-key map (kbd "C-c C-l")	'glf-toggle-location-visibility)
+;;    (define-key map (kbd "C-c C-t")   'glf-toggle-truncate-lines)
+;;    (define-key map (kbd "C-c S")     'glf-errors-summary)
+;;    (define-key map (kbd "C-c C-l")   'glf-toggle-location-visibility)
     map)
   "Keymap for `glf-mode' mode")
 
@@ -413,9 +475,10 @@
   "Major mode for viewing GLF files."
   (glf-parse-header)
 
-;???
+  ;; patterns
   (set (make-local-variable 'glf-end-column-pattern) (format "%c\\|$" glf-column-separator))
   (set (make-local-variable 'glf-location-pattern) (format "^\\([^%c][^:\r\n]+\\):\\([[:digit:]]+\\):" glf-column-separator))
+  (set (make-local-variable 'glf-infoline-pattern) (format "^%c[a-f0-9\-]+%c" glf-column-separator glf-column-separator))
 
   ;; font-lock
   (set (make-local-variable 'glf-next-background-color) 0)
