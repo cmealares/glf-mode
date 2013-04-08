@@ -351,6 +351,27 @@
 ;;; Movements
 ;;;
 
+(defun glf-read-column (name)
+  "Read column value on current line"
+  (save-excursion
+    (beginning-of-line)
+    (unless (eq (char-after) glf-column-separator)
+      (forward-line 1))
+
+    (let ((index (gethash name glf-column-indexes-map))
+	  (separator (format "%c" glf-column-separator)))
+      (if (null index)
+	  (error "Unknown column name: %s" name)
+
+	(let
+	    ((start-pos (search-forward separator (line-end-position) t (1+ index)))
+	     (end-pos (search-forward separator (line-end-position) t 1)))
+
+	  (if (null start-pos)
+	      nil
+	    (buffer-substring-no-properties start-pos
+					    (1- (if (null end-pos) (line-end-position) end-pos)))) )))))
+
 (defun glf-search-error (search-fun)
   (unless (apply search-fun
 		 (list (format "%c[AEX]%c" glf-column-separator glf-column-separator) nil t))
@@ -367,12 +388,32 @@
   (glf-search-error 're-search-backward))
 
 
+;;?? glf-goto-file
 
+(defun glf-forward-infoline ()
+  "Move to next infoline"
+  (beginning-of-line)
+  (forward-line)
+  (while (and (not (eobp))
+	      (not (looking-at glf-infoline-pattern)))
+    (forward-line)))
 
+(defun glf-backward-infoline ()
+  "Move to previous infoline"
+  (beginning-of-line)
+  (forward-line -1)
+  (while (and (not (bobp))
+	      (not (looking-at glf-infoline-pattern)))
+    (forward-line -1)))
 
-
-
-
+;;??glf-beginning-of-record
+;;??glf-end-of-record
+;;??glf-forward-paragraph
+;;??glf-backward-paragraph
+;;??glf-forward-record
+;;??glf-backward-record
+;;??glf-forward-thread
+;;??glf-backward-thread
 
 ;;;
 ;;; keymap
@@ -413,9 +454,10 @@
   "Major mode for viewing GLF files."
   (glf-parse-header)
 
-;???
+  ;; patterns
   (set (make-local-variable 'glf-end-column-pattern) (format "%c\\|$" glf-column-separator))
   (set (make-local-variable 'glf-location-pattern) (format "^\\([^%c][^:\r\n]+\\):\\([[:digit:]]+\\):" glf-column-separator))
+  (set (make-local-variable 'glf-infoline-pattern) (format "^%c[a-f0-9\-]+%c" glf-column-separator glf-column-separator))
 
   ;; font-lock
   (set (make-local-variable 'glf-next-background-color) 0)
