@@ -1,10 +1,35 @@
-;;;
-;;; Faces
-;;;
+;;; glf-mode.el -- major mode for viewing GLF log files
+;;
+;;; Authors:
+;;     Christophe Mealares
+;;     Laurent P
+;;
+;;; Main features:
+;;    Syntax coloration
+;;    Focus on a particular thread by hiding others
+;;    Thread navigation:
+;;      - move to next/previous thread paragraph;
+;;      - move to next/previous paragraph in same thread.
+;;    Collapse/expand paragraph
+;;    Indentation of nested scopes
+;;    Errors are indexed by IMenu: setup with (global-set-key [mouse-3] 'imenu)
+;;
+;;; Installation:
+;;    Put this file on your load path.
+;;    Then add the following lines to your Emacs initialization file:
+;;
+;;      (add-to-list 'auto-mode-alist '("\\.glf$" . glf-mode))
+;;      (autoload 'glf-mode "glf" nil t)
+;;
+;;    Performance is better when this file is byte-compiled.
+;;    Byte-compile it by typing:
+;;      M-x byte-compile-file and have Emacs byte-compile
+
 
 ;;;
 ;;; Customization
 ;;;
+
 (defgroup glf nil
   "Major mode for viewing GLF files."
   :prefix "glf-"
@@ -22,6 +47,10 @@
   "Non nil means to color different threads with different colors."
   :type 'boolean
   :group 'glf)
+
+;;;
+;;; Faces
+;;;
 
 (defgroup glf-faces nil
   "Fontification colors."
@@ -197,11 +226,9 @@
 	    )
 	(when font
 	  (setq res (cons (list index
-				(if (eq font :invisible) invisible-face font));??? insert reference???
+				(if (eq font :invisible) invisible-face font))
 			  res))
 	  (setq index (1+ index)))))))
-
-;;?? for debug (setq font-lock-support-mode nil)
 
 (defun glf-column-matcher (search-limit)
   (let
@@ -211,7 +238,6 @@
     matchlist))
 
 (defun search-columns (speclist search-limit)
-
   (if (not (re-search-forward "^|" search-limit t))
       nil
     (catch 'badmatch
@@ -227,58 +253,39 @@
 	(nreverse matchlist)))))
 
 (defun search-column (search-limit count isInvisible)
-
-(setq titi (format "[%c%c]" glf-column-separator glf-record-separator));????
-
   (let
       ((begin (if isInvisible (1- (point)) (point)))
-       (end (re-search-forward titi search-limit t count)))
+       (end (re-search-forward glf-end-column-pattern search-limit t count)))
     (unless end (throw 'badmatch nil))
     (list begin (1- end))))
 
 (defun skip-column (search-limit count)
-(setq titi (format "[%c%c]" glf-column-separator glf-record-separator));????
-  (when (not (re-search-forward titi search-limit t count))
+  (unless (re-search-forward glf-end-column-pattern search-limit t count)
     (throw 'badmatch nil)))
 
 (defun glf-font-lock-keywords ()
-  (list
-   (cons 'glf-column-matcher (glf-compute-font-lock-column-faces)) ;??? variable ou pas?
-   )
-;  "Build font lock keywords for `glf-mode'."
-)
+  "Build font lock keywords for `glf-mode'."
+  (let ((sep glf-column-separator))
+    (list
 
-;  (let ((sep glf-column-separator))
-;    (list
      ;; Location
-;?     (if (eq glf-default-location-visibility-mode 'grayed-out)
-;?	 (cons (format "^[^%c][^:\r\n]*:[^:\r\n]*:.*\r?" glf-column-separator) 'glf-light-text-face)
-;?       (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
+     (if (eq glf-default-location-visibility-mode 'grayed-out)
+	 (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
+       (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
 
-
-     ;; Columns
-;?     (glf-font-lock-columns-keyword '(("Location" . nil)
-;?                                      ("Time" . glf-column-time-face)
-;?                                      ("Importance" . nil)
-;?                                      ("Severity" . nil)
-;?                                      ("Exception" . nil)
-;?                                      ("ProcessID" . glf-column-process-id-face)
-;?                                      ("ThreadID" . glf-column-thread-id-face)
-;?                                      ("ScopeTag" . glf-column-scope-tag-face)
-;?                                      ("Text" . (glf-get-current-thread-face)))
-;?                                    "ThreadID")
+     ; Columns
+     (cons 'glf-column-matcher (glf-compute-font-lock-column-faces))
 
      ;; Errors and exceptions
-;?     (cons (format "%c\\([AEX]\\)%c.*%c\\([^%c\r\n]*\\)$" sep sep sep sep) '((1 glf-errors-face) (2 glf-errors-face append)))
-
+     (cons (format "%c\\([AEX]\\(?:|X\\)?\\)%c.*%c\\([^%c\r\n]*\\)$" sep sep sep sep) '((1 glf-errors-face) (2 glf-errors-face append)))
      ;; Warnings
-;?     (cons (format "%c\\(W\\)%c.*%c\\([^%c\r\n]*\\)$" sep sep sep sep) '((1 glf-warnings-face) (2 glf-warnings-face append)))
-;     )))
-
+     (cons (format "%c\\(W\\)%c.*%c\\([^%c\r\n]*\\)$" sep sep sep sep) '((1 glf-warnings-face) (2 glf-warnings-face append)))
+     )) )
 
 ;;;
 ;;; Parsing file header
 ;;;
+
 (defun glf-read-header-alist ()
   (let ((header-alist ()))
     (goto-char (point-min))
@@ -337,37 +344,98 @@
     (princ (format "glf-columns : %s\n" glf-columns))
     (princ (format "glf-column-indexes-map : %s\n" glf-column-indexes-map))
     (princ (format "glf-font-lock-column-specification : %s\n" glf-font-lock-column-specification))
-    (princ (format "glf-font-lock-column-faces : %s\n" glf-font-lock-column-faces))
     (princ (format "glf-thread-match-data-index : %d\n" glf-thread-match-data-index))
 ))
 
+;;;
+;;; Movements
+;;;
+
+(defun glf-search-error (search-fun)
+  (unless (apply search-fun
+		 (list (format "%c[AEX]%c" glf-column-separator glf-column-separator) nil t))
+    (message "No more error")))
+
+(defun glf-next-error ()
+  "Search for next error."
+  (interactive)
+  (glf-search-error 're-search-forward))
+
+(defun glf-previous-error ()
+  "Search for previous error."
+  (interactive)
+  (glf-search-error 're-search-backward))
+
+
+
+
+
+
+
+
+
+;;;
+;;; keymap
+;;;
+
+(defvar glf-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "<C-next>")	'glf-next-error)
+    (define-key map (kbd "<C-prior>")	'glf-previous-error)
+;;    (define-key map (kbd "C-c RET")	'glf-goto-file)
+;;
+;;    ;; open xml trace file
+;;    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
+;;    (define-key map (kbd "C-c C-y")     'glf-return-find-file-other-window)
+;;    (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
+;;
+;;    (define-key map (kbd "<C-down>")	'glf-forward-paragraph)
+;;    (define-key map (kbd "<C-up>")	'glf-backward-paragraph)
+;;
+;;    (define-key map (kbd "<M-down>")	'glf-forward-thread)
+;;    (define-key map (kbd "<M-up>")	'glf-backward-thread)
+;;
+;;    (define-key map (kbd "C-c C-f")	'glf-thread-focus)
+;;    (define-key map (kbd "C-c C-u")	'glf-thread-unfocus)
+;;
+;;    (define-key map (kbd "C-c C-t")	'glf-toggle-truncate-lines)
+;;    (define-key map (kbd "C-c S")	'glf-errors-summary)
+;;    (define-key map (kbd "C-c C-l")	'glf-toggle-location-visibility)
+    map)
+  "Keymap for `glf-mode' mode")
+
+;;?
+(defun glf-regexp-quote-char (c)
+  (regexp-quote (char-to-string c)))
 
 ;;;###autoload
 (define-derived-mode glf-mode fundamental-mode "glf"
   "Major mode for viewing GLF files."
   (glf-parse-header)
 
+;???
+  (set (make-local-variable 'glf-end-column-pattern) (format "%c\\|$" glf-column-separator))
+  (set (make-local-variable 'glf-location-pattern) (format "^\\([^%c][^:\r\n]+\\):\\([[:digit:]]+\\):" glf-column-separator))
+
   ;; font-lock
   (set (make-local-variable 'glf-next-background-color) 0)
+  (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
   (set (make-local-variable 'glf-thread-faces-map) (make-hash-table :test 'equal))
   (set (make-local-variable 'glf-font-lock-column-specification) (glf-compute-font-lock-column-specification))
   (set (make-local-variable 'glf-thread-match-data-index) (glf-compute-thread-match-data-index))
-  (set (make-local-variable 'glf-font-lock-column-faces) (glf-compute-font-lock-column-faces))
   (set (make-local-variable 'font-lock-defaults) '(glf-font-lock-keywords t))
 
 
-;?  (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
-
-  (set (make-local-variable 'glf-location-pattern) (format "^\\([^%c][^:\r\n]*\\):\\([[:digit:]]+\\):" glf-column-separator))
 
 
+;??? TODO manage all 3 cases ?
+;  (if (eq glf-default-location-visibility-mode 'invisible)
+;      (glf-toggle-location-visibility))
 
 
 
   (glf-test)
 )
-
-(add-to-list 'auto-mode-alist '("\\.glf$" . glf-mode))
 
 ;;; provide myself
 (provide 'glf-mode)
