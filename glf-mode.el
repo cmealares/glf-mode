@@ -386,8 +386,28 @@
   (interactive)
   (glf-search-error 're-search-backward))
 
-
-;;?? glf-goto-file
+(defun glf-goto-file ()
+  "Goto file and line that correspond to the current message"
+  (interactive)
+  (save-excursion
+    (beginning-of-line)
+    (save-match-data
+      (if (or (looking-at glf-location-pattern)
+              (and (forward-line -1)
+                   (looking-at glf-location-pattern)))
+          (let ((pathfile (match-string-no-properties 1))
+                (lineno (string-to-number (match-string-no-properties 2))))
+            (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
+		   (filename (car (last pathparts)))
+		   (buffer (get-buffer filename)))
+              (if buffer
+                  (progn (switch-to-buffer-other-window buffer)
+                         (goto-char (point-min))
+                         (if (> lineno 1)
+                             (forward-line (- lineno 1)))
+                         (beginning-of-line))
+                (error "No buffer visiting %s" filename))))
+        (error "No location found on this line")))))
 
 (defun glf-forward-infoline ()
   "Move to next infoline"
