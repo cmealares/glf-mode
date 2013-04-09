@@ -395,8 +395,8 @@
           (let ((pathfile (match-string-no-properties 1))
                 (lineno (string-to-number (match-string-no-properties 2))))
             (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
-		   (filename (car (last pathparts)))
-		   (buffer (get-buffer filename)))
+                   (filename (car (last pathparts)))
+                   (buffer (get-buffer filename)))
               (if buffer
                   (progn (switch-to-buffer-other-window buffer)
                          (goto-char (point-min))
@@ -406,18 +406,6 @@
                 (error "No buffer visiting %s" filename))))
         (error "No location found on this line")))))
 
-(defun glf-sync-infoline ()
-  "Move to infoline of current record"
-  (beginning-of-line)
-  (when (not (looking-at glf-infoline-pattern))
-    (if (looking-at glf-location-pattern)
-	(forward-line 1)
-
-      (while (and (not (bobp))
-		  (not (looking-at glf-infoline-pattern)))
-	(forward-line -1)))))
-
-;;??
 (defun glf-forward-infoline ()
   "Move to next infoline"
   (beginning-of-line)
@@ -426,7 +414,6 @@
               (not (looking-at glf-infoline-pattern)))
     (forward-line)))
 
-;;??
 (defun glf-backward-infoline ()
   "Move to previous infoline"
   (beginning-of-line)
@@ -435,23 +422,40 @@
               (not (looking-at glf-infoline-pattern)))
     (forward-line -1)))
 
-;;??glf-beginning-of-record
+(defun glf-sync-infoline ()
+  "Move to infoline of current record"
+  (beginning-of-line)
+  (when (not (looking-at glf-infoline-pattern))
+    (if (looking-at glf-location-pattern)
+        (forward-line 1)
+
+      (while (and (not (bobp))
+                  (not (looking-at glf-infoline-pattern)))
+        (forward-line -1)))))
 
 ;;??glf-end-of-record
+(defun glf-end-of-record ()
+  "Goto the end of current record"
+  (interactive)
+  (end-of-line)
+  (while (and (not (eq (char-before) glf-record-separator)) (not (eq (point) (point-max))))
+    (forward-char)
+    (end-of-line)))
 
 (defun glf-forward-paragraph ()
-  "Move to next thread paragraph."
+  "Move to end of thread paragraph."
+  ;; A paragraph end is not part of the paragraph
   (interactive)
-  (glf-forward-infoline)
+  (glf-sync-infoline)
   (let ((tid (glf-read-column "ThreadID")))
     (while (and (not (eobp))
                 (equal tid (glf-read-column "ThreadID")))
       (glf-forward-infoline))
-    (glf-backward-infoline)
     (message (format "Reached end of thread %s" tid))))
 
 (defun glf-backward-paragraph ()
-  "Move to previous thread paragraph."
+  "Move backward to start of thread paragraph."
+  ;; A paragraph start is part of the paragraph
   (interactive)
   (glf-backward-infoline)
   (let ((tid (glf-read-column "ThreadID")))
@@ -488,11 +492,26 @@
       (setq i (1- i)))
     (beginning-of-line)))
 
+;;??
+(defun glf-forward-line-same-column (column-name next-record-fun)
+  (glf-end-of-record)
+  (let ((column-value (glf-read-column column-name)))
+    (funcall next-record-fun)
+    (while (let ((current-column (glf-read-column column-name)))
+             (and current-column (not (equal current-column column-value))))
+      (funcall next-record-fun))))
 
+;;??
+(defun glf-forward-thread ()
+  "Go to the next line of same thread"
+  (interactive)
+  (glf-forward-line-same-column "ThreadID" 'glf-forward-record))
 
-;;??glf-forward-thread
-
-;;??glf-backward-thread
+;;??
+(defun glf-backward-thread ()
+  "Go to the previous line of same thread"
+  (interactive)
+  (glf-forward-line-same-column "ThreadID" 'glf-backward-record))
 
 ;;;
 ;;; keymap
@@ -503,7 +522,7 @@
     (define-key map (kbd "<C-next>")    'glf-next-error)
     (define-key map (kbd "<C-prior>")   'glf-previous-error)
     (define-key map (kbd "C-c RET")     'glf-goto-file)
-;;
+
 ;;    ;; open xml trace file
 ;;    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
 ;;    (define-key map (kbd "C-c C-y")     'glf-return-find-file-other-window)
@@ -514,10 +533,10 @@
 
     (define-key map (kbd "<M-down>")    'glf-forward-thread)
     (define-key map (kbd "<M-up>")      'glf-backward-thread)
-;;
+
 ;;    (define-key map (kbd "C-c C-f")   'glf-thread-focus)
 ;;    (define-key map (kbd "C-c C-u")   'glf-thread-unfocus)
-;;
+
 ;;    (define-key map (kbd "C-c C-t")   'glf-toggle-truncate-lines)
 ;;    (define-key map (kbd "C-c S")     'glf-errors-summary)
 ;;    (define-key map (kbd "C-c C-l")   'glf-toggle-location-visibility)
