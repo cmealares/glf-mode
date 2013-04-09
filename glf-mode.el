@@ -352,11 +352,9 @@
 ;;;
 
 (defun glf-read-column (name)
-  "Read column value on current line"
+  "Read column value on current column line. Caller must set position on a column line."
   (save-excursion
     (beginning-of-line)
-    (unless (eq (char-after) glf-column-separator)
-      (forward-line 1))
 
     (let ((index (gethash name glf-column-indexes-map))
           (separator (format "%c" glf-column-separator)))
@@ -390,11 +388,10 @@
   "Goto file and line that correspond to the current message"
   (interactive)
   (save-excursion
-    (beginning-of-line)
+    (glf-sync-infoline)
+    (forward-line -1)
     (save-match-data
-      (if (or (looking-at glf-location-pattern)
-              (and (forward-line -1)
-                   (looking-at glf-location-pattern)))
+      (if (looking-at glf-location-pattern)
           (let ((pathfile (match-string-no-properties 1))
                 (lineno (string-to-number (match-string-no-properties 2))))
             (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
@@ -409,6 +406,18 @@
                 (error "No buffer visiting %s" filename))))
         (error "No location found on this line")))))
 
+(defun glf-sync-infoline ()
+  "Move to infoline of current record"
+  (beginning-of-line)
+  (when (not (looking-at glf-infoline-pattern))
+    (if (looking-at glf-location-pattern)
+	(forward-line 1)
+
+      (while (and (not (bobp))
+		  (not (looking-at glf-infoline-pattern)))
+	(forward-line -1)))))
+
+;;??
 (defun glf-forward-infoline ()
   "Move to next infoline"
   (beginning-of-line)
@@ -417,6 +426,7 @@
               (not (looking-at glf-infoline-pattern)))
     (forward-line)))
 
+;;??
 (defun glf-backward-infoline ()
   "Move to previous infoline"
   (beginning-of-line)
@@ -451,9 +461,34 @@
     (glf-forward-infoline)
     (message (format "Reached beginning of thread %s" tid))))
 
-;;??glf-forward-record
+;;??
+(defun glf-forward-record (&optional n)
+  "Move forward to the last line of the record"
+  (end-of-line)
+  (if (>= (1+ (point)) (point-max))
+      (forward-char)
+    (let ((i (1+ (or n 1))))
+      (while (> i 0)
+        (glf-end-of-record)
+        (forward-char)
+        (setq i (1- i)))
+      (backward-char)
+      (beginning-of-line))))
 
-;;??glf-backward-record
+;;??
+(defun glf-backward-record (&optional n)
+  "Move backward on the last line of the record"
+  (let ((i (or n 1)))
+    (while (> i 0)
+      (beginning-of-line)
+      (backward-char)
+      (while (and (not (eq (char-before) glf-record-separator)) (not (eq (point) (point-min))))
+        (beginning-of-line)
+        (backward-char))
+      (setq i (1- i)))
+    (beginning-of-line)))
+
+
 
 ;;??glf-forward-thread
 
@@ -520,7 +555,6 @@
 
 
 
-  (glf-test)
 )
 
 ;;; provide myself
