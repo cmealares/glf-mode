@@ -451,7 +451,7 @@
                 (equal tid (glf-read-column "ThreadID")))
       (glf-forward-infoline))
     (glf-backward-infoline)
-    (message (format "Reached end of thread %s" tid))))
+    (message "Reached end of thread %s" tid)))
 
 (defun glf-backward-paragraph ()
   "Move backward to start of thread paragraph."
@@ -462,7 +462,7 @@
                 (equal tid (glf-read-column "ThreadID")))
       (glf-backward-infoline))
     (glf-forward-infoline)
-    (message (format "Reached beginning of thread %s" tid))))
+    (message "Reached beginning of thread %s" tid)))
 
 (defun glf-forward-thread ()
   "Go to the next line of same thread"
@@ -477,7 +477,7 @@
 		  (not (equal tid (glf-read-column "ThreadID"))))))
 
     (unless (equal tid (glf-read-column "ThreadID"))
-      (message (format "Thread %s ends here" tid))
+      (message "Thread %s ends here" tid)
       (goto-char origin))))
 
 (defun glf-backward-thread ()
@@ -493,8 +493,89 @@
 		  (not (equal tid (glf-read-column "ThreadID"))))))
 
     (unless (equal tid (glf-read-column "ThreadID"))
-      (message (format "Thread %s starts here" tid))
+      (message "Thread %s starts here" tid)
       (goto-char origin))))
+
+;;;
+;;; Open xml trace file with mouse
+;;;
+
+(defun glf-jit-process (beg end)
+  (interactive "r")
+  (goto-char beg)
+  (while
+      (let ((lbp (line-beginning-position))
+ 	    (lep (line-end-position)))
+
+	(glf-link-file beg lep)
+	(let ((next (1+ lep)))
+	  (if (< next end)
+	      (goto-char next)
+	    nil)))))
+
+(defun glf-link-file (beg end)
+  "Define clickable text on XML trace file"
+
+  (while (search-forward-regexp
+	  "TraceFile_Name:\\(.*\\.xml\\)"
+	  ;"\\(?:\\.\\.\\|[a-zA-Z]:\\)?\\([\\/][- ~._()a-z0-9A-Z]*\\)+[\\/]"
+	  end t)
+    (let*
+	((mbp (match-beginning 0))
+	 (path (match-string 1))
+	 (validPath (glf-validate-path path)))
+
+      (if validPath
+	  (add-text-properties
+	   mbp
+	   (point)
+	   `(mouse-face highlight
+			help-echo "mouse-2: visit this file in other window"
+			glf-linked-file ,validPath)) ))))
+
+(defun glf-mouse-find-file-other-window (event)
+  "Visit the file or directory name you click on."
+  (interactive "e")
+  (let ((window (posn-window (event-end event)))
+	(pos (posn-point (event-end event)))
+	file)
+    (when (not (windowp window))
+	(error "No file chosen"))
+    (with-current-buffer (window-buffer window)
+      (setq file (get-text-property pos 'glf-linked-file))
+
+     (cond
+      ((null file)             (message "No file at this position"))
+      ((file-directory-p file) (select-window window)(dired-other-window file))
+      ((file-regular-p file)   (select-window window)(find-file-other-window file))
+      (t                       (message "File not found: %s" file))))))
+
+(defun glf-return-find-file-other-window ()
+  "Visit a file or a directory"
+  (interactive)
+  (let
+      ((file  (get-text-property (point) 'glf-linked-file)))
+      (cond
+       ((null file)             (message "No file at this position"))
+       ((file-directory-p file) (dired-other-window file))
+       ((file-regular-p file)   (find-file-other-window file))
+       (t                       (message "File not found: %s" file)))))
+
+(defun glf-validate-path (str)
+  "Transform the input path into a valid one (if possible)"
+  (if (file-exists-p str)
+      str
+    ;; often, paths are malformed and must be fixed
+    (let* ((pattern "wicdztrace")
+	   (index  (string-match pattern str)))
+      (if (null index)
+	  nil
+	(setq str (substring str (+ 1 index (length pattern))))
+	(setq str (concat (file-name-as-directory pattern) str))
+
+	(if (file-exists-p str)
+	    str
+	  nil)))))
 
 ;;;
 ;;; keymap
@@ -506,10 +587,10 @@
     (define-key map (kbd "<C-prior>")   'glf-previous-error)
     (define-key map (kbd "C-c RET")     'glf-goto-file)
 
-;;    ;; open xml trace file
-;;    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
-;;    (define-key map (kbd "C-c C-y")     'glf-return-find-file-other-window)
-;;    (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
+    ;; open xml trace file
+    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
+    (define-key map (kbd "C-c C-v")     'glf-return-find-file-other-window)
+    (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
 
     (define-key map (kbd "<C-down>")    'glf-forward-paragraph)
     (define-key map (kbd "<C-up>")      'glf-backward-paragraph)
@@ -526,14 +607,13 @@
     map)
   "Keymap for `glf-mode' mode")
 
-;;?
-(defun glf-regexp-quote-char (c)
-  (regexp-quote (char-to-string c)))
 
 ;;;###autoload
 (define-derived-mode glf-mode fundamental-mode "glf"
   "Major mode for viewing GLF files."
   (glf-parse-header)
+
+  (use-local-map glf-mode-map)
 
   ;; patterns
   (set (make-local-variable 'glf-end-column-pattern) (format "%c\\|$" glf-column-separator))
@@ -548,16 +628,13 @@
   (set (make-local-variable 'glf-thread-match-data-index) (glf-compute-thread-match-data-index))
   (set (make-local-variable 'font-lock-defaults) '(glf-font-lock-keywords t))
 
-
-
-
-;??? TODO manage all 3 cases ?
+;??? TODO manage all 3 cases
 ;  (if (eq glf-default-location-visibility-mode 'invisible)
 ;      (glf-toggle-location-visibility))
 
+  (when (fboundp 'jit-lock-register)
+    (jit-lock-register 'glf-jit-process)))
 
-
-)
 
 ;;; provide myself
 (provide 'glf-mode)
