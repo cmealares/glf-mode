@@ -330,7 +330,7 @@
         (dotimes (i nb-columns)
           (puthash (nth i glf-columns) i glf-column-indexes-map))) )))
 
-(defun glf-test ()
+(defun glf-show-var ()
   "Print the result of some reading functions"
   (interactive)
   (with-output-to-temp-buffer "*glf-test*"
@@ -497,6 +497,18 @@
       (goto-char origin))))
 
 ;;;
+;;; Indentation
+;;;
+
+;;;
+;;; Information
+;;;
+
+;;;
+;;; Thread focus
+;;;
+
+;;;
 ;;; Open xml trace file with mouse
 ;;;
 
@@ -517,6 +529,8 @@
   "Define clickable text on XML trace file"
 
   (while (search-forward-regexp
+	  ; ?? could font lock for this pattern ?
+	  ; ?? location should be clickable too
 	  "TraceFile_Name:\\(.*\\.xml\\)"
 	  ;"\\(?:\\.\\.\\|[a-zA-Z]:\\)?\\([\\/][- ~._()a-z0-9A-Z]*\\)+[\\/]"
 	  end t)
@@ -619,7 +633,6 @@
   (set (make-local-variable 'glf-end-column-pattern) (format "%c\\|$" glf-column-separator))
   (set (make-local-variable 'glf-location-pattern) (format "^\\([^%c][^:\r\n]+\\):\\([[:digit:]]+\\):" glf-column-separator))
   (set (make-local-variable 'glf-infoline-pattern) (format "^%c[a-f0-9\-]+%c" glf-column-separator glf-column-separator))
-
   ;; font-lock
   (set (make-local-variable 'glf-next-background-color) 0)
   (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
@@ -627,6 +640,9 @@
   (set (make-local-variable 'glf-font-lock-column-specification) (glf-compute-font-lock-column-specification))
   (set (make-local-variable 'glf-thread-match-data-index) (glf-compute-thread-match-data-index))
   (set (make-local-variable 'font-lock-defaults) '(glf-font-lock-keywords t))
+  ;; indenting
+  (set (make-local-variable 'indent-line-function) 'glf-indent-paragraph)
+  (set (make-local-variable 'indent-region-function) 'glf-indent-region)
 
 ;??? TODO manage all 3 cases
 ;  (if (eq glf-default-location-visibility-mode 'invisible)
