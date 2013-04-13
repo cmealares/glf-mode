@@ -118,7 +118,6 @@
 ;;;
 
 ;; try ielm ???
-;; try font-lock-refresh-defaults
 
 (defconst glf-background-colors
   '("cornsilk"
@@ -330,7 +329,7 @@
         (dotimes (i nb-columns)
           (puthash (nth i glf-columns) i glf-column-indexes-map))) )))
 
-(defun glf-show-var ()
+(defun glf-test ()
   "Print the result of some reading functions"
   (interactive)
   (with-output-to-temp-buffer "*glf-test*"
@@ -350,6 +349,13 @@
 ;;;
 ;;; Movements
 ;;;
+
+(defsubst glf-goto-field (n)
+  "Move to nth field of the current infoline. Counting starts at 0."
+  (beginning-of-line)
+  (if (zerop n)
+      t
+    (search-forward (format "%c" glf-column-separator) (line-end-position) t (1+ n))))
 
 (defun glf-read-column (name)
   "Read column value on current column line. Caller must set position on a column line."
@@ -444,17 +450,18 @@
 
 (defun glf-forward-paragraph ()
   "Move to end of thread paragraph."
+  ;; in other words: go to first line of next paragraph
   (interactive)
   (glf-forward-infoline)
   (let ((tid (glf-read-column "ThreadID")))
     (while (and (not (eobp))
                 (equal tid (glf-read-column "ThreadID")))
       (glf-forward-infoline))
-    (glf-backward-infoline)
-    (message "Reached end of thread %s" tid)))
+    (message "Reached end of paragraph %s" tid)))
 
 (defun glf-backward-paragraph ()
   "Move backward to start of thread paragraph."
+  ;; go to first line of current paragraph
   (interactive)
   (glf-backward-infoline)
   (let ((tid (glf-read-column "ThreadID")))
@@ -462,7 +469,22 @@
                 (equal tid (glf-read-column "ThreadID")))
       (glf-backward-infoline))
     (glf-forward-infoline)
-    (message "Reached beginning of thread %s" tid)))
+    (message "Reached beginning of paragraph %s" tid)))
+
+(defun glf-beginning-of-paragraph ()
+  (glf-sync-infoline)
+  (let ((tid (glf-read-column "ThreadID"))
+	(previous (save-excursion (glf-backward-infoline) (glf-read-column "ThreadID"))))
+    (when (equal tid previous)
+      (glf-backward-paragraph))))
+
+(defun glf-end-of-paragraph ()
+  (glf-sync-infoline)
+  (let ((tid (glf-read-column "ThreadID"))
+	(next (save-excursion (glf-forward-infoline) (glf-read-column "ThreadID"))))
+    (if (equal tid next)
+      (glf-forward-paragraph)
+      (forward-line 1))))
 
 (defun glf-forward-thread ()
   "Go to the next line of same thread"
@@ -499,6 +521,81 @@
 ;;;
 ;;; Indentation
 ;;;
+(defvar glf-indent-width 3 "Indentation size")
+
+(defsubst glf-find-overlays-specifying (prop)
+  (let ((result))
+    (dolist (ov (overlays-at (point)) result)
+      (if (overlay-get ov prop)
+	  (setq result (cons ov result))))
+    result))
+
+(defsubst glf-read-depth ()
+  "Read depth of current log line"
+  (let
+      ((depth (string-to-number (glf-read-column "MinorDepth")))
+       (scope (glf-read-column "ScopeTag")))
+      (cond
+       ((equal scope "{")  (1- depth))
+       ((equal scope "}")  (1- depth))
+       (t                  depth))))
+
+(defsubst glf-search-indenter ()
+  "Move to indenter overlay of current line and read it"
+
+  (let ((index (gethash "Text" glf-column-indexes-map)))
+    (glf-goto-field index))
+
+  (let ((indenters (glf-find-overlays-specifying  'glf-indent)))
+    (if (null indenters)
+	nil
+      (car indenters))))
+
+(defun glf-update-indenter (overlay size)
+  "Modify overlay so that it becomes an indenter of the given size"
+  (overlay-put overlay 'glf-indent size)
+  (overlay-put overlay 'priority 0)
+  (overlay-put overlay 'before-string (make-string (* (max 0 size) glf-indent-width) ?\ )))
+
+(defsubst glf-indent-line ()
+  "Indent current line"
+  (interactive)
+  (when (save-excursion
+	  (beginning-of-line)
+	  (looking-at glf-infoline-pattern))
+    (let ((overlay  (glf-search-indenter)))
+      (when (null overlay)
+	(setq overlay (make-overlay (point) (1+ (point)))))
+      (glf-update-indenter overlay (glf-read-depth)))))
+
+(defun glf-indent-paragraph ()
+  "Indent current current paragraph"
+  (interactive)
+  (glf-sync-infoline)
+  (save-excursion
+    (glf-indent-region
+     (progn (glf-beginning-of-paragraph) (point))
+     (progn (glf-end-of-paragraph) (point)))))
+
+(defun glf-indent-region (beg end)
+  "Indent region"
+  (interactive "r")
+
+  (overlay-recenter end)
+
+  (save-excursion
+    (goto-char beg)
+
+    (let ((countLines (count-lines beg end))
+	 (line 0))
+      (while (< (point) end)
+	(setq line (1+ line))
+	(when (zerop (% line 50))
+	  (message (format "Indenting line %d/%d" line countLines)))
+
+	(glf-indent-line)
+	(forward-line 1))
+      (message "Indenting done: %d lines" countLines))))
 
 ;;;
 ;;; Information
