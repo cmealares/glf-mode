@@ -288,13 +288,15 @@
 (defun glf-read-header-alist ()
   (let ((header-alist ()))
     (goto-char (point-min))
-    (when (looking-at-p "FILE_TYPE:")
-      (while (not (looking-at-p "HEADER_END"))
-        (if (looking-at "\\([A-Z_]+\\):\\(.*\\)")
-            (let ((name (match-string-no-properties 1))
-                  (value (match-string-no-properties 2)))
-              (setq header-alist (cons (cons name value) header-alist))
-              (forward-line) ))))
+    (unless (looking-at-p "FILE_TYPE:")
+      (error "header not found, invalid GLF file"))
+    (while (not (looking-at-p "HEADER_END"))
+      (if (looking-at "\\([A-Z_]+\\):\\(.*\\)")
+          (let ((name (match-string-no-properties 1))
+                (value (match-string-no-properties 2)))
+            (setq header-alist (cons (cons name value) header-alist))
+            (forward-line) )))
+    (forward-line) ;;skip HEADER_END
     header-alist))
 
 (defun glf-get-header-value (name type alist default &optional column-separator)
@@ -310,14 +312,9 @@
   (save-excursion
     (let ((header (glf-read-header-alist)))
 
-      (set (make-local-variable 'glf-end-of-header-point)
-           (if header
-               (progn (forward-line)) (point)
-               (point-min)))
-
+      (set (make-local-variable 'glf-end-of-header-point) (point))
       (set (make-local-variable 'glf-file-type) (glf-get-header-value "FILE_TYPE" :string header nil))
       (set (make-local-variable 'glf-file-encoding) (glf-get-header-value "ENCODING" :string header "UTF-8"))
-
       (set (make-local-variable 'glf-record-separator) (glf-get-header-value "RECORD_SEPARATOR" :char header 30))
       (set (make-local-variable 'glf-column-separator) (glf-get-header-value "COLUMN_SEPARATOR" :char header 124))
       (set (make-local-variable 'glf-escape-char) (glf-get-header-value "ESC_CHARACTER" :char header 27))
@@ -452,7 +449,7 @@
   "Move to end of thread paragraph."
   ;; in other words: go to first line of next paragraph
   (interactive)
-  (glf-forward-infoline)
+  (glf-sync-infoline)
   (let ((tid (glf-read-column "ThreadID")))
     (while (and (not (eobp))
                 (equal tid (glf-read-column "ThreadID")))
@@ -616,49 +613,105 @@
         (error "Invalid GLF file, no header found."))
 
       (let ((error-map (make-hash-table :test 'equal))
-	    (exception-map (make-hash-table :test 'equal))
-	    (assert-map (make-hash-table :test 'equal))
-	    (error-regexp (format "%c\\([AE]\\)%c\\([ X]\\)%c.*%c\\([^%c\r\n]+\\)"
-				  glf-column-separator glf-column-separator
-				  glf-column-separator glf-column-separator
-				  glf-column-separator)))
-	(while (re-search-forward error-regexp nil t)
-	  (let ((error-type (string-to-char (match-string-no-properties 1)))
-		(exception-p (string= (match-string-no-properties 2) "X"))
-		(error-message
-		 (replace-regexp-in-string "\\<[1-9][0-9]+\\>" "<integer>"
-					   (replace-regexp-in-string "\\<[0-9]+[.][0-9]+\\>" "<float>"
-								     (match-string-no-properties 3)))))
-	    (cond (exception-p (puthash error-message t exception-map))
-		  ((eq error-type ?A) (puthash error-message t assert-map))
-		  ((eq error-type ?E) (puthash error-message t error-map)))))
-	(if (and (= (hash-table-count assert-map) 0)
-		 (= (hash-table-count error-map) 0)
-		 (= (hash-table-count exception-map) 0))
-	    (message "No errors")
-	  (let ((sections (list (cons "Errors" error-map)
-				(cons "Exceptions" exception-map)
-				(cons "Asserts" assert-map))))
-	    (switch-to-buffer-other-window (get-buffer-create "*GLF error summary*"))
-	    (erase-buffer)
+            (exception-map (make-hash-table :test 'equal))
+            (assert-map (make-hash-table :test 'equal))
+            (error-regexp (format "%c\\([AE]\\)%c\\([ X]\\)%c.*%c\\([^%c\r\n]+\\)"
+                                  glf-column-separator glf-column-separator
+                                  glf-column-separator glf-column-separator
+                                  glf-column-separator)))
+        (while (re-search-forward error-regexp nil t)
+          (let ((error-type (string-to-char (match-string-no-properties 1)))
+                (exception-p (string= (match-string-no-properties 2) "X"))
+                (error-message
+                 (replace-regexp-in-string "\\<[1-9][0-9]+\\>" "<integer>"
+                                           (replace-regexp-in-string "\\<[0-9]+[.][0-9]+\\>" "<float>"
+                                                                     (match-string-no-properties 3)))))
+            (cond (exception-p (puthash error-message t exception-map))
+                  ((eq error-type ?A) (puthash error-message t assert-map))
+                  ((eq error-type ?E) (puthash error-message t error-map)))))
+        (if (and (= (hash-table-count assert-map) 0)
+                 (= (hash-table-count error-map) 0)
+                 (= (hash-table-count exception-map) 0))
+            (message "No errors")
+          (let ((sections (list (cons "Errors" error-map)
+                                (cons "Exceptions" exception-map)
+                                (cons "Asserts" assert-map))))
+            (switch-to-buffer-other-window (get-buffer-create "*GLF error summary*"))
+            (erase-buffer)
 
-	    (dolist (section sections)
-	      (let ((section-name (car section))
-		    (messages (glf-hashmap-keys (cdr section))))
-		(when (> (length messages) 0)
-		  (insert section-name)
-		  (newline)
-		  (insert (make-string (length section-name) ?-))
-		  (newline)
-		  (while messages
-		    (insert (car messages))
-		    (newline)
-		    (setq messages (cdr messages)))
-		  (newline)))) )))))
+            (dolist (section sections)
+              (let ((section-name (car section))
+                    (messages (glf-hashmap-keys (cdr section))))
+                (when (> (length messages) 0)
+                  (insert section-name)
+                  (newline)
+                  (insert (make-string (length section-name) ?-))
+                  (newline)
+                  (while messages
+                    (insert (car messages))
+                    (newline)
+                    (setq messages (cdr messages)))
+                  (newline)))) )))))
 
 ;;;
 ;;; Thread focus
 ;;;
+
+(defun glf-thread-unfocus ()
+  "Display all threads"
+  (interactive)
+  (mapc (lambda (overlay) (delete-overlay overlay)) glf-invisible-overlays)
+  (setq glf-invisible-overlays ()))
+
+(defun glf-thread-focus (tid)
+  "Display only the given thread"
+  (interactive
+   (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
+     (list (read-string "Focus on thread: " current))))
+
+  (when glf-invisible-overlays
+    (error "focus already set"))
+
+  (glf-hide-regions (function (lambda()
+                                (save-excursion
+                                  (glf-sync-infoline)
+                                  (string= (glf-read-column "ThreadID") tid))))
+		    (function (lambda ()
+				(glf-forward-paragraph)
+				(when (not (eobp))
+				  (forward-line -1)
+				  (unless (looking-at glf-location-pattern)
+				    (forward-line 1)))))))
+
+(defun glf-hide-regions (is-visible-p next-region)
+  "Hide regions not matching is-visible-p"
+;(save-excursion
+
+  (goto-char glf-end-of-header-point)
+
+  (let ((invisible-overlays '())
+        start-pos)
+
+    (while (not (eobp))
+      (if (funcall is-visible-p)
+          (if start-pos
+              (setq invisible-overlays (cons (make-overlay start-pos (point)) invisible-overlays)
+                    start-pos nil))
+        (if (not start-pos)
+            (setq start-pos (point))))
+      (funcall next-region))
+
+    (if start-pos
+        (setq invisible-overlays (cons (make-overlay start-pos (point)) invisible-overlays)))
+
+    (while invisible-overlays
+      (let ((overlay (car invisible-overlays)))
+        (overlay-put overlay 'invisible t)
+        (setq glf-invisible-overlays (cons overlay glf-invisible-overlays)))
+      (setq invisible-overlays (cdr invisible-overlays)))))
+
+;?? revoir tlog-make-brush
+
 
 ;;;
 ;;; Open xml trace file with mouse
@@ -764,8 +817,8 @@
     (define-key map (kbd "<M-down>")    'glf-forward-thread)
     (define-key map (kbd "<M-up>")      'glf-backward-thread)
 
-;;    (define-key map (kbd "C-c C-f")   'glf-thread-focus)
-;;    (define-key map (kbd "C-c C-u")   'glf-thread-unfocus)
+    (define-key map (kbd "C-c C-f")   'glf-thread-focus)
+    (define-key map (kbd "C-c C-u")   'glf-thread-unfocus)
 
     (define-key map (kbd "C-c S")     'glf-errors-summary)
 ;;    (define-key map (kbd "C-c C-t")   'glf-toggle-truncate-lines)
@@ -795,6 +848,9 @@
   ;; indenting
   (set (make-local-variable 'indent-line-function) 'glf-indent-paragraph)
   (set (make-local-variable 'indent-region-function) 'glf-indent-region)
+  ;; thread focus
+  (set (make-local-variable 'glf-invisible-overlays) nil)
+
 
 ;??? TODO manage all 3 cases
 ;  (if (eq glf-default-location-visibility-mode 'invisible)
