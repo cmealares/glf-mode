@@ -117,8 +117,6 @@
 ;;; Syntax highlighting
 ;;;
 
-;; try ielm ???
-
 (defconst glf-background-colors
   '("cornsilk"
     "misty rose"
@@ -454,7 +452,8 @@
     (while (and (not (eobp))
                 (equal tid (glf-read-column "ThreadID")))
       (glf-forward-infoline))
-    (message "Reached end of paragraph %s" tid)))
+    (when (interactive-p)
+      (message "Reached end of paragraph %s" tid))))
 
 (defun glf-backward-paragraph ()
   "Move backward to start of thread paragraph."
@@ -466,7 +465,8 @@
                 (equal tid (glf-read-column "ThreadID")))
       (glf-backward-infoline))
     (glf-forward-infoline)
-    (message "Reached beginning of paragraph %s" tid)))
+    (when (interactive-p)
+      (message "Reached beginning of paragraph %s" tid))))
 
 (defun glf-beginning-of-paragraph ()
   (glf-sync-infoline)
@@ -662,15 +662,11 @@
 
 (defun glf-thread-unfocus ()
   "Display all threads"
-  (interactive)
   (mapc (lambda (overlay) (delete-overlay overlay)) glf-invisible-overlays)
   (setq glf-invisible-overlays ()))
 
 (defun glf-thread-focus (tid)
   "Display only the given thread"
-  (interactive
-   (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
-     (list (read-string "Focus on thread: " current))))
 
   (glf-thread-unfocus)
 
@@ -687,6 +683,19 @@
 		       (unless (looking-at glf-location-pattern)
 			 (forward-line 1)))))
 	 glf-invisible-thread-alist)))
+
+(defun glf-toggle-thread-focus (tid)
+  "Display only the given thread or display them all if given a nil parameter"
+  (interactive
+   (if (null glf-invisible-overlays)
+       (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
+	 (list (read-string "Focus on thread: " current)))
+     (list nil)))
+
+  (if tid
+      (glf-thread-focus tid)
+    (glf-thread-unfocus)
+    (message "Showing all threads")))
 
 (defun glf-overlay-regions (apply-overlay-p next-region alist)
   "Overlay regions that match the given predicate"
@@ -814,8 +823,7 @@
     (define-key map (kbd "<M-down>")    'glf-forward-thread)
     (define-key map (kbd "<M-up>")      'glf-backward-thread)
 
-    (define-key map (kbd "C-c C-f")   'glf-thread-focus)
-    (define-key map (kbd "C-c C-u")   'glf-thread-unfocus)
+    (define-key map (kbd "C-c C-f")   'glf-toggle-thread-focus)
 
     (define-key map (kbd "C-c S")     'glf-errors-summary)
 ;;    (define-key map (kbd "C-c C-t")   'glf-toggle-truncate-lines)
