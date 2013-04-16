@@ -657,6 +657,8 @@
 ;;; Thread focus
 ;;;
 
+(defconst glf-invisible-thread-alist
+  '((glf-focus . t) (invisible . t) (priority . 5)))
 
 (defun glf-thread-unfocus ()
   "Display all threads"
@@ -672,42 +674,41 @@
 
   (glf-thread-unfocus)
 
-  (glf-hide-regions (function (lambda()
-                                (save-excursion
-                                  (glf-sync-infoline)
-                                  (string= (glf-read-column "ThreadID") tid))))
-		    (function (lambda ()
-				(glf-forward-paragraph)
-				(when (not (eobp))
-				  (forward-line -1)
-				  (unless (looking-at glf-location-pattern)
-				    (forward-line 1)))))))
+  (setq glf-invisible-overlays
+	(glf-overlay-regions
+	 (function (lambda()
+		     (save-excursion
+		       (glf-sync-infoline)
+		       (not (string= (glf-read-column "ThreadID") tid)))))
+	 (function (lambda ()
+		     (glf-forward-paragraph)
+		     (when (not (eobp))
+		       (forward-line -1)
+		       (unless (looking-at glf-location-pattern)
+			 (forward-line 1)))))
+	 glf-invisible-thread-alist)))
 
-;?? revoir tlog-make-brush
-;?? revoir la creation des overlays ci-dessous
-
-(defun glf-hide-regions (is-visible-p next-region)
-  "Hide regions not matching is-visible-p"
+(defun glf-overlay-regions (apply-overlay-p next-region alist)
+  "Overlay regions that match the given predicate"
   (save-excursion
     (overlay-recenter (point-max))
 
-    (let ((invisible-overlays '())
+    (let ((overlays '())
 	  (start-pos (goto-char glf-end-of-header-point)))
 
       (while (not (eobp))
-	(let ((visibility (funcall is-visible-p)))
+	(let ((apply-p (funcall apply-overlay-p)))
 	  (funcall next-region)
-
-	  (unless visibility
-	    (setq invisible-overlays (cons (make-overlay start-pos (point)) invisible-overlays)))
-
+	  (when apply-p
+	    (setq overlays (cons (glf-overlay-region start-pos (point) alist)
+				 overlays)))
 	  (setq start-pos (point)) ))
+      overlays)))
 
-      (while invisible-overlays
-	(let ((overlay (car invisible-overlays)))
-	  (overlay-put overlay 'invisible t)
-	  (setq glf-invisible-overlays (cons overlay glf-invisible-overlays)))
-	(setq invisible-overlays (cdr invisible-overlays))))))
+(defun glf-overlay-region (start end alist)
+  (let ((overlay (make-overlay start end)))
+    (dolist (property alist overlay)
+      (overlay-put overlay (car property) (cdr property)))))
 
 ;;;
 ;;; Open xml trace file with mouse
