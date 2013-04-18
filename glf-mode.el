@@ -429,19 +429,9 @@
   (when (not (looking-at glf-infoline-pattern))
     (if (looking-at glf-location-pattern)
         (forward-line 1)
-
       (while (and (not (bobp))
                   (not (looking-at glf-infoline-pattern)))
         (forward-line -1)))))
-
-;;??glf-end-of-record
-(defun glf-end-of-record ()
-  "Goto the end of current record"
-  (interactive)
-  (end-of-line)
-  (while (and (not (eq (char-before) glf-record-separator)) (not (eq (point) (point-max))))
-    (forward-char)
-    (end-of-line)))
 
 (defun glf-forward-paragraph ()
   "Move to end of thread paragraph."
@@ -476,11 +466,10 @@
       (glf-backward-paragraph))))
 
 (defun glf-end-of-paragraph ()
-  (glf-sync-infoline)
-  (let ((tid (glf-read-column "ThreadID"))
-        (next (save-excursion (glf-forward-infoline) (glf-read-column "ThreadID"))))
-    (if (equal tid next)
-      (glf-forward-paragraph)
+  (glf-forward-paragraph)
+  (when (not (eobp))
+    (forward-line -1)
+    (unless (looking-at glf-location-pattern)
       (forward-line 1))))
 
 (defun glf-forward-thread ()
@@ -671,25 +660,20 @@
   (glf-thread-unfocus)
 
   (setq glf-invisible-overlays
-	(glf-overlay-regions
-	 (function (lambda()
-		     (save-excursion
-		       (glf-sync-infoline)
-		       (not (string= (glf-read-column "ThreadID") tid)))))
-	 (function (lambda ()
-		     (glf-forward-paragraph)
-		     (when (not (eobp))
-		       (forward-line -1)
-		       (unless (looking-at glf-location-pattern)
-			 (forward-line 1)))))
-	 glf-invisible-thread-alist)))
+        (glf-overlay-regions
+         (function (lambda()
+                     (save-excursion
+                       (glf-sync-infoline)
+                       (not (string= (glf-read-column "ThreadID") tid)))))
+         'glf-end-of-paragraph
+         glf-invisible-thread-alist)))
 
 (defun glf-toggle-thread-focus (tid)
   "Display only the given thread or display them all if given a nil parameter"
   (interactive
    (if (null glf-invisible-overlays)
        (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
-	 (list (read-string "Focus on thread: " current)))
+         (list (read-string "Focus on thread: " current)))
      (list nil)))
 
   (if tid
@@ -703,21 +687,88 @@
     (overlay-recenter (point-max))
 
     (let ((overlays '())
-	  (start-pos (goto-char glf-end-of-header-point)))
+          (start-pos (goto-char glf-end-of-header-point)))
 
       (while (not (eobp))
-	(let ((apply-p (funcall apply-overlay-p)))
-	  (funcall next-region)
-	  (when apply-p
-	    (setq overlays (cons (glf-overlay-region start-pos (point) alist)
-				 overlays)))
-	  (setq start-pos (point)) ))
+        (let ((apply-p (funcall apply-overlay-p)))
+          (funcall next-region)
+          (when apply-p
+            (setq overlays (cons (glf-overlay-region start-pos (point) alist)
+                                 overlays)))
+          (setq start-pos (point)) ))
       overlays)))
 
 (defun glf-overlay-region (start end alist)
   (let ((overlay (make-overlay start end)))
     (dolist (property alist overlay)
       (overlay-put overlay (car property) (cdr property)))))
+
+;;;
+;;; Collapse expand
+;;;
+
+(defconst glf-collapsed-alist
+  '((glf-collapse . t) (invisible . glf-collapse) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
+
+(defun glf-unset-invisible (ov)
+  (overlay-put ov 'invisible nil))
+
+(defun glf-read-collapser ()
+  "Read a collapser overlay"
+  (let ((overlays (glf-find-overlays-specifying  'glf-collapse)))
+    (if (null overlays)
+        nil
+      (car overlays))))
+
+(defun glf-collapse-expand ()
+  "Collapse or expand the current paragraph"
+  (interactive)
+  (save-excursion
+    (glf-beginning-of-paragraph)
+
+    (let ((beg (point))
+          (end (save-excursion (glf-end-of-paragraph) (point))))
+      (glf-collapse-region beg end))))
+
+
+(defun glf-collapse-region (beg end &optional collapse-p)
+  "Collapse or expand the given region"
+  (goto-char beg)
+  (forward-line)
+
+  (when (not (equal end (point))) ; when region is too small, we ignore it
+
+    (let* ((overlay (glf-read-collapser))
+           (collapse-p (or (not (null collapse-p))
+                           (not (and overlay
+                                     (overlay-get overlay 'invisible))))))
+
+      (if collapse-p
+          (if overlay
+               (overlay-put overlay 'invisible 'glf-collapse)
+            (glf-overlay-region (point) (1- end) glf-collapsed-alist))
+        (when overlay
+          (delete-overlay overlay))))))
+
+(defun glf-find-regions (end-function &optional start-function)
+  (let ((regions nil))
+    (while (not (eobp))
+      (let ((start-point (point)))
+        (funcall end-function)
+        (push (cons start-point (point)) regions)
+        (when start-function (funcall start-function))))
+    regions))
+
+(defun glf-collapse-expand-all ()
+  "Collapse/expand all paragraphs"
+  (interactive)
+  (save-excursion
+    (goto-char (point-min))
+    (glf-forward-infoline)
+    (setq glf-collapse-all-p (not glf-collapse-all-p))
+    (dolist (region (glf-find-regions 'glf-end-of-paragraph
+				      'forward-line))
+      (glf-collapse-region (car region) (cdr region) glf-collapse-all-p))))
 
 ;;;
 ;;; Open xml trace file with mouse
@@ -825,6 +876,9 @@
 
     (define-key map (kbd "C-c C-f")   'glf-toggle-thread-focus)
 
+    (define-key map  (kbd "C-c C-c")   'glf-collapse-expand)
+    (define-key map  (kbd "C-c C-a")   'glf-collapse-expand-all)
+
     (define-key map (kbd "C-c S")     'glf-errors-summary)
 ;;    (define-key map (kbd "C-c C-t")   'glf-toggle-truncate-lines)
 ;;    (define-key map (kbd "C-c C-l")   'glf-toggle-location-visibility)
@@ -855,6 +909,10 @@
   (set (make-local-variable 'indent-region-function) 'glf-indent-region)
   ;; thread focus
   (set (make-local-variable 'glf-invisible-overlays) nil)
+  ;; collapse expand
+  (set (make-local-variable 'glf-collapse-all-p) nil)
+  (add-to-invisibility-spec '(glf-collapse . t)) ;display as ellipsis
+
 
 
 ;??? TODO manage all 3 cases
