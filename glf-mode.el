@@ -583,6 +583,16 @@
         (forward-line 1))
       (message "Indenting done: %d lines" countLines))))
 
+(defun glf-find-regions (end-function &optional start-function)
+  "make a list of pairs of region's start and end positions"
+  (let ((regions nil))
+    (while (not (eobp))
+      (let ((start-point (point)))
+        (funcall end-function)
+        (push (cons start-point (point)) regions)
+        (when start-function (funcall start-function))))
+    regions))
+
 ;;;
 ;;; Information summary
 ;;;
@@ -649,25 +659,6 @@
 (defconst glf-invisible-thread-alist
   '((glf-focus . t) (invisible . t) (priority . 5)))
 
-(defun glf-thread-unfocus ()
-  "Display all threads"
-  (mapc (lambda (overlay) (delete-overlay overlay)) glf-invisible-overlays)
-  (setq glf-invisible-overlays ()))
-
-(defun glf-thread-focus (tid)
-  "Display only the given thread"
-
-  (glf-thread-unfocus)
-
-  (setq glf-invisible-overlays
-        (glf-overlay-regions
-         (function (lambda()
-                     (save-excursion
-                       (glf-sync-infoline)
-                       (not (string= (glf-read-column "ThreadID") tid)))))
-         'glf-end-of-paragraph
-         glf-invisible-thread-alist)))
-
 (defun glf-toggle-thread-focus (tid)
   "Display only the given thread or display them all if given a nil parameter"
   (interactive
@@ -681,22 +672,29 @@
     (glf-thread-unfocus)
     (message "Showing all threads")))
 
-(defun glf-overlay-regions (apply-overlay-p next-region alist)
-  "Overlay regions that match the given predicate"
+(defun glf-thread-unfocus ()
+  "Display all threads"
+  (mapc (lambda (overlay) (delete-overlay overlay)) glf-invisible-overlays)
+  (setq glf-invisible-overlays ()))
+
+(defun glf-thread-focus (tid)
+  "Display only the given thread"
+  (glf-thread-unfocus)
+
   (save-excursion
-    (overlay-recenter (point-max))
+    (goto-char glf-end-of-header-point)
+    (glf-find-paragraph-not-on-thread tid)
 
-    (let ((overlays '())
-          (start-pos (goto-char glf-end-of-header-point)))
+    (setq glf-invisible-overlays
+	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-thread-alist)))
+		  (glf-find-regions 'glf-end-of-paragraph
+				    (lambda () (glf-find-paragraph-not-on-thread tid)))))))
 
-      (while (not (eobp))
-        (let ((apply-p (funcall apply-overlay-p)))
-          (funcall next-region)
-          (when apply-p
-            (setq overlays (cons (glf-overlay-region start-pos (point) alist)
-                                 overlays)))
-          (setq start-pos (point)) ))
-      overlays)))
+(defun glf-find-paragraph-not-on-thread (tid)
+  "Find the next paragraph that do not belong to the given thread or stay at current position"
+  (while (and (not (eobp))
+	      (string= tid (save-excursion (glf-sync-infoline)(glf-read-column "ThreadID"))))
+    (glf-end-of-paragraph)))
 
 (defun glf-overlay-region (start end alist)
   (let ((overlay (make-overlay start end)))
@@ -749,15 +747,6 @@
             (glf-overlay-region (point) (1- end) glf-collapsed-alist))
         (when overlay
           (delete-overlay overlay))))))
-
-(defun glf-find-regions (end-function &optional start-function)
-  (let ((regions nil))
-    (while (not (eobp))
-      (let ((start-point (point)))
-        (funcall end-function)
-        (push (cons start-point (point)) regions)
-        (when start-function (funcall start-function))))
-    regions))
 
 (defun glf-collapse-expand-all ()
   "Collapse/expand all paragraphs"
