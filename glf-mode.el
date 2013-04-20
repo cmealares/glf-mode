@@ -38,7 +38,7 @@
 
 (defcustom glf-default-location-visibility-mode 'grayed-out
   "Non nil means to show file location by default."
-  :type '(choice (const :tag "Invisible (slow)" :value invisible)
+  :type '(choice (const :tag "Invisible" :value invisible)
                  (const :tag "Visible" :value visible)
                  (const :tag "Grayed out" :value grayed-out))
   :group 'glf)
@@ -662,7 +662,7 @@
 (defun glf-toggle-thread-focus (tid)
   "Display only the given thread or display them all if given a nil parameter"
   (interactive
-   (if (null glf-invisible-overlays)
+   (if (null glf-thread-overlays)
        (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
          (list (read-string "Focus on thread: " current)))
      (list nil)))
@@ -674,8 +674,8 @@
 
 (defun glf-thread-unfocus ()
   "Display all threads"
-  (mapc (lambda (overlay) (delete-overlay overlay)) glf-invisible-overlays)
-  (setq glf-invisible-overlays ()))
+  (mapc (lambda (overlay) (delete-overlay overlay)) glf-thread-overlays)
+  (setq glf-thread-overlays ()))
 
 (defun glf-thread-focus (tid)
   "Display only the given thread"
@@ -685,7 +685,7 @@
     (goto-char glf-end-of-header-point)
     (glf-find-paragraph-not-on-thread tid)
 
-    (setq glf-invisible-overlays
+    (setq glf-thread-overlays
 	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-thread-alist)))
 		  (glf-find-regions 'glf-end-of-paragraph
 				    (lambda () (glf-find-paragraph-not-on-thread tid)))))))
@@ -758,6 +758,35 @@
     (dolist (region (glf-find-regions 'glf-end-of-paragraph
 				      'forward-line))
       (glf-collapse-region (car region) (cdr region) glf-collapse-all-p))))
+
+;;;
+;;; Hide / show location
+;;;
+
+(defconst glf-invisible-location-alist
+  '((glf-location . t) (invisible . glf-location) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
+
+(defun glf-toggle-location-visibility ()
+  "Show or hide location lines"
+  (interactive)
+  (if glf-location-overlays
+      (progn
+	;; ?? could avoid destroying the overlays
+	(mapc (lambda (overlay) (delete-overlay overlay)) glf-location-overlays)
+	(setq glf-location-overlays nil))
+
+    (goto-char glf-end-of-header-point)
+    (glf-find-location-line)
+
+    (setq glf-location-overlays
+	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-location-alist)))
+		  (glf-find-regions 'forward-line
+				    'glf-find-location-line)))))
+
+(defun glf-find-location-line ()
+  (while (and (not (eobp))
+	      (not (looking-at-p glf-location-pattern)))
+    (forward-line 1)))
 
 ;;;
 ;;; Open xml trace file with mouse
@@ -863,14 +892,14 @@
     (define-key map (kbd "<M-down>")    'glf-forward-thread)
     (define-key map (kbd "<M-up>")      'glf-backward-thread)
 
-    (define-key map (kbd "C-c C-f")   'glf-toggle-thread-focus)
+    (define-key map (kbd "C-c C-f")     'glf-toggle-thread-focus)
 
-    (define-key map  (kbd "C-c C-c")   'glf-collapse-expand)
-    (define-key map  (kbd "C-c C-a")   'glf-collapse-expand-all)
+    (define-key map (kbd "C-c C-c")     'glf-collapse-expand)
+    (define-key map (kbd "C-c C-a")     'glf-collapse-expand-all)
 
-    (define-key map (kbd "C-c S")     'glf-errors-summary)
-;;    (define-key map (kbd "C-c C-t")   'glf-toggle-truncate-lines)
-;;    (define-key map (kbd "C-c C-l")   'glf-toggle-location-visibility)
+    (define-key map (kbd "C-c S")       'glf-errors-summary)
+
+    (define-key map (kbd "C-c C-l")     'glf-toggle-location-visibility)
     map)
   "Keymap for `glf-mode' mode")
 
@@ -888,7 +917,6 @@
   (set (make-local-variable 'glf-infoline-pattern) (format "^%c[a-f0-9\-]+%c" glf-column-separator glf-column-separator))
   ;; font-lock
   (set (make-local-variable 'glf-next-background-color) 0)
-  (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
   (set (make-local-variable 'glf-thread-faces-map) (make-hash-table :test 'equal))
   (set (make-local-variable 'glf-font-lock-column-specification) (glf-compute-font-lock-column-specification))
   (set (make-local-variable 'glf-thread-match-data-index) (glf-compute-thread-match-data-index))
@@ -897,16 +925,17 @@
   (set (make-local-variable 'indent-line-function) 'glf-indent-paragraph)
   (set (make-local-variable 'indent-region-function) 'glf-indent-region)
   ;; thread focus
-  (set (make-local-variable 'glf-invisible-overlays) nil)
+  (set (make-local-variable 'glf-thread-overlays) nil)
   ;; collapse expand
   (set (make-local-variable 'glf-collapse-all-p) nil)
   (add-to-invisibility-spec '(glf-collapse . t)) ;display as ellipsis
+  ;; location visibility
+  (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
+  (set (make-local-variable 'glf-location-overlays) nil)
+  (add-to-invisibility-spec 'glf-location)
 
-
-
-;??? TODO manage all 3 cases
-;  (if (eq glf-default-location-visibility-mode 'invisible)
-;      (glf-toggle-location-visibility))
+  (if (eq glf-location-visibility-mode 'invisible)
+      (glf-toggle-location-visibility))
 
   (when (fboundp 'jit-lock-register)
     (jit-lock-register 'glf-jit-process)))
