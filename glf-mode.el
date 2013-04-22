@@ -315,7 +315,7 @@
       (set (make-local-variable 'glf-record-separator) (glf-get-header-value "RECORD_SEPARATOR" :char header 30))
       (set (make-local-variable 'glf-column-separator) (glf-get-header-value "COLUMN_SEPARATOR" :char header 124))
       (set (make-local-variable 'glf-escape-char) (glf-get-header-value "ESC_CHARACTER" :char header 27))
-      ;; ignore location: not a true column
+      ;; remove first column because it is the location and is not a real column
       (set (make-local-variable 'glf-columns) (cdr (glf-get-header-value "COLUMNS" :list header '() glf-column-separator)))
 
       (let ((nb-columns (length glf-columns)))
@@ -383,27 +383,6 @@
   "Search for previous error."
   (interactive)
   (glf-search-error 're-search-backward))
-
-(defun glf-goto-file ()
-  "Goto file and line that correspond to the current message"
-  (interactive)
-  (save-excursion
-    (glf-sync-infoline)
-    (forward-line -1)
-    (unless (looking-at glf-location-pattern)
-      (error "No location found on this line"))
-    (let ((pathfile (match-string-no-properties 1))
-	  (lineno (string-to-number (match-string-no-properties 2))))
-      (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
-	     (filename (car (last pathparts)))
-	     (buffer (get-buffer filename)))
-	(if buffer
-	    (progn (switch-to-buffer-other-window buffer)
-		   (goto-char (point-min))
-		   (if (> lineno 1)
-		       (forward-line (- lineno 1)))
-		   (beginning-of-line))
-	  (error "No buffer visiting %s" filename))))))
 
 (defun glf-forward-infoline ()
   "Move to next infoline"
@@ -505,6 +484,7 @@
 ;;;
 ;;; Indentation
 ;;;
+
 (defvar glf-indent-width 3 "Indentation size")
 
 (defsubst glf-find-overlays-specifying (prop)
@@ -764,7 +744,6 @@
 (defconst glf-invisible-location-alist
   '((glf-location . t) (invisible . t) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
 
-
 (defun glf-toggle-location-visibility ()
   "Show or hide location lines"
   (interactive)
@@ -794,31 +773,30 @@
     (forward-line 1)))
 
 ;;;
-;;; Open xml trace file with mouse
+;;; Visit referenced files: xml trace and code location
 ;;;
 
 (defun glf-jit-process (beg end)
   (interactive "r")
   (goto-char beg)
   (while
-      (let ((lbp (line-beginning-position))
+      (let ((lbp (line-beginning-position)) ;??unused
             (lep (line-end-position)))
 
-        (glf-link-file beg lep)
+        (glf-link-trace-file beg lep)
         (let ((next (1+ lep)))
           (if (< next end)
               (goto-char next)
             nil)))))
 
-(defun glf-link-file (beg end)
+(defun glf-link-trace-file (beg end)
   "Define clickable text on XML trace file"
 
-          ; ?? location should be clickable too
   (while (search-forward-regexp "TraceFile_Name:\\(.*\\.xml\\)" end t)
     (let*
         ((mbp (match-beginning 0))
          (path (match-string 1))
-         (validPath (glf-validate-path path)))
+         (validPath (glf-validate-trace-path path)))
 
       (when validPath
 	(add-text-properties
@@ -826,37 +804,9 @@
 	 (point)
 	 `(mouse-face highlight
 		      help-echo "mouse-2: visit this file in other window"
-		      glf-linked-file ,validPath)) ))))
+		      glf-linked-trace-file ,validPath)) ))))
 
-(defun glf-mouse-find-file-other-window (event)
-  "Visit the file or directory name you click on."
-  (interactive "e")
-  (let ((window (posn-window (event-end event)))
-        (pos (posn-point (event-end event)))
-        file)
-    (when (not (windowp window))
-        (error "No file chosen"))
-    (with-current-buffer (window-buffer window)
-      (setq file (get-text-property pos 'glf-linked-file))
-
-     (cond
-      ((null file)             (message "No file at this position"))
-      ((file-directory-p file) (select-window window)(dired-other-window file))
-      ((file-regular-p file)   (select-window window)(find-file-other-window file))
-      (t                       (message "File not found: %s" file))))))
-
-(defun glf-return-find-file-other-window ()
-  "Visit a file or a directory"
-  (interactive)
-  (let
-      ((file  (get-text-property (point) 'glf-linked-file)))
-      (cond
-       ((null file)             (message "No file at this position"))
-       ((file-directory-p file) (dired-other-window file))
-       ((file-regular-p file)   (find-file-other-window file))
-       (t                       (message "File not found: %s" file)))))
-
-(defun glf-validate-path (str)
+(defun glf-validate-trace-path (str)
   "Transform the input path into a valid one (if possible)"
   (if (file-exists-p str)
       str
@@ -872,6 +822,49 @@
             str
           nil)))))
 
+(defun glf-mouse-find-linked-file (event)
+  "Visit the file or directory name you click on."
+  (interactive "e")
+  (let ((window (posn-window (event-end event)))
+        (pos (posn-point (event-end event))))
+    (when (not (windowp window))
+        (error "No file chosen"))
+    (with-current-buffer (window-buffer window)
+      (select-window window)
+      (glf-find-linked-file pos))))
+
+(defun glf-find-linked-file (&optional position)
+  "Visit a file or a directory"
+  (interactive)
+  (let
+      ((file (get-text-property (or position (point)) 'glf-linked-trace-file)))
+    (cond
+     ((null file)             (message "No file at this position"))
+     ((file-directory-p file) (dired-other-window file))
+     ((file-regular-p file)   (find-file-other-window file))
+     (t                       (message "File not found: %s" file)))))
+
+(defun glf-goto-file ()
+  "Goto file and line that correspond to the current message"
+  (interactive)
+  (save-excursion
+    (glf-sync-infoline)
+    (forward-line -1)
+    (unless (looking-at glf-location-pattern)
+      (error "No location found on this line"))
+    (let ((pathfile (match-string-no-properties 1))
+	  (lineno (string-to-number (match-string-no-properties 2))))
+      (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
+	     (filename (car (last pathparts)))
+	     (buffer (get-buffer filename)))
+	(if buffer
+	    (progn (switch-to-buffer-other-window buffer)
+		   (goto-char (point-min))
+		   (if (> lineno 1)
+		       (forward-line (- lineno 1)))
+		   (beginning-of-line))
+	  (error "No buffer visiting %s" filename))))))
+
 ;;;
 ;;; keymap
 ;;;
@@ -883,8 +876,8 @@
     (define-key map (kbd "C-c RET")     'glf-goto-file)
 
     ;; open xml trace file
-    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
-    (define-key map (kbd "C-c C-v")     'glf-return-find-file-other-window)
+    (define-key map [mouse-2]           'glf-mouse-find-linked-file)
+    (define-key map (kbd "C-c C-v")     'glf-find-linked-file)
     (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
 
     (define-key map (kbd "<C-down>")    'glf-forward-paragraph)
