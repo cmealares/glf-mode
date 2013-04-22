@@ -36,10 +36,9 @@
   :group 'data
   :version "1.0")
 
-(defcustom glf-default-location-visibility-mode 'grayed-out
-  "Non nil means to show file location by default."
-  :type '(choice (const :tag "Invisible" :value invisible)
-                 (const :tag "Visible" :value visible)
+(defcustom glf-location-visibility-mode 'grayed-out
+  "Default style of the file location."
+  :type '(choice (const :tag "Visible" :value visible)
                  (const :tag "Grayed out" :value grayed-out))
   :group 'glf)
 
@@ -266,7 +265,7 @@
     (list
 
      ;; Location
-     (if (eq glf-default-location-visibility-mode 'grayed-out)
+     (if (eq glf-location-visibility-mode 'grayed-out)
          (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
        (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
 
@@ -391,21 +390,20 @@
   (save-excursion
     (glf-sync-infoline)
     (forward-line -1)
-    (save-match-data
-      (if (looking-at glf-location-pattern)
-          (let ((pathfile (match-string-no-properties 1))
-                (lineno (string-to-number (match-string-no-properties 2))))
-            (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
-                   (filename (car (last pathparts)))
-                   (buffer (get-buffer filename)))
-              (if buffer
-                  (progn (switch-to-buffer-other-window buffer)
-                         (goto-char (point-min))
-                         (if (> lineno 1)
-                             (forward-line (- lineno 1)))
-                         (beginning-of-line))
-                (error "No buffer visiting %s" filename))))
-        (error "No location found on this line")))))
+    (unless (looking-at glf-location-pattern)
+      (error "No location found on this line"))
+    (let ((pathfile (match-string-no-properties 1))
+	  (lineno (string-to-number (match-string-no-properties 2))))
+      (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
+	     (filename (car (last pathparts)))
+	     (buffer (get-buffer filename)))
+	(if buffer
+	    (progn (switch-to-buffer-other-window buffer)
+		   (goto-char (point-min))
+		   (if (> lineno 1)
+		       (forward-line (- lineno 1)))
+		   (beginning-of-line))
+	  (error "No buffer visiting %s" filename))))))
 
 (defun glf-forward-infoline ()
   "Move to next infoline"
@@ -764,24 +762,31 @@
 ;;;
 
 (defconst glf-invisible-location-alist
-  '((glf-location . t) (invisible . glf-location) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
+  '((glf-location . t) (invisible . t) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
+
 
 (defun glf-toggle-location-visibility ()
   "Show or hide location lines"
   (interactive)
-  (if glf-location-overlays
-      (progn
-	;; ?? could avoid destroying the overlays
-	(mapc (lambda (overlay) (delete-overlay overlay)) glf-location-overlays)
-	(setq glf-location-overlays nil))
+  (cond
+   ((null glf-location-overlays)
+    (setq glf-location-overlays (glf-make-hiding-overlays)
+	  glf-location-visible-p nil))
+   (glf-location-visible-p
+    (mapc (lambda (overlay) (overlay-put overlay 'invisible t)) glf-location-overlays)
+    (setq glf-location-visible-p nil))
+   (t
+    (mapc (lambda (overlay) (overlay-put overlay 'invisible nil)) glf-location-overlays)
+    (setq glf-location-visible-p t))))
 
+(defun glf-make-hiding-overlays ()
+  (save-excursion
     (goto-char glf-end-of-header-point)
     (glf-find-location-line)
 
-    (setq glf-location-overlays
-	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-location-alist)))
-		  (glf-find-regions 'forward-line
-				    'glf-find-location-line)))))
+    (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-location-alist)))
+	    (glf-find-regions 'forward-line
+			      'glf-find-location-line))))
 
 (defun glf-find-location-line ()
   (while (and (not (eobp))
@@ -808,24 +813,20 @@
 (defun glf-link-file (beg end)
   "Define clickable text on XML trace file"
 
-  (while (search-forward-regexp
-          ; ?? could font lock for this pattern ?
           ; ?? location should be clickable too
-          "TraceFile_Name:\\(.*\\.xml\\)"
-          ;"\\(?:\\.\\.\\|[a-zA-Z]:\\)?\\([\\/][- ~._()a-z0-9A-Z]*\\)+[\\/]"
-          end t)
+  (while (search-forward-regexp "TraceFile_Name:\\(.*\\.xml\\)" end t)
     (let*
         ((mbp (match-beginning 0))
          (path (match-string 1))
          (validPath (glf-validate-path path)))
 
-      (if validPath
-          (add-text-properties
-           mbp
-           (point)
-           `(mouse-face highlight
-                        help-echo "mouse-2: visit this file in other window"
-                        glf-linked-file ,validPath)) ))))
+      (when validPath
+	(add-text-properties
+	 mbp
+	 (point)
+	 `(mouse-face highlight
+		      help-echo "mouse-2: visit this file in other window"
+		      glf-linked-file ,validPath)) ))))
 
 (defun glf-mouse-find-file-other-window (event)
   "Visit the file or directory name you click on."
@@ -859,7 +860,7 @@
   "Transform the input path into a valid one (if possible)"
   (if (file-exists-p str)
       str
-    ;; often, paths are malformed and must be fixed
+    ;; many paths are malformed and must be fixed
     (let* ((pattern "wicdztrace")
            (index  (string-match pattern str)))
       (if (null index)
@@ -930,12 +931,8 @@
   (set (make-local-variable 'glf-collapse-all-p) nil)
   (add-to-invisibility-spec '(glf-collapse . t)) ;display as ellipsis
   ;; location visibility
-  (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
   (set (make-local-variable 'glf-location-overlays) nil)
-  (add-to-invisibility-spec 'glf-location)
-
-  (if (eq glf-location-visibility-mode 'invisible)
-      (glf-toggle-location-visibility))
+  (set (make-local-variable 'glf-location-visible-p) t)
 
   (when (fboundp 'jit-lock-register)
     (jit-lock-register 'glf-jit-process)))
