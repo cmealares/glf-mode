@@ -11,8 +11,9 @@
 ;;      - move to next/previous thread paragraph;
 ;;      - move to next/previous paragraph in same thread.
 ;;    Collapse/expand paragraph
-;;    Indentation of nested scopes
-;;    Errors are indexed by IMenu: setup with (global-set-key [mouse-3] 'imenu)
+;;    Indent nested scopes
+;;    Goto xml trace file
+;;    Goto source code
 ;;
 ;;; Installation:
 ;;    Put this file on your load path.
@@ -36,10 +37,9 @@
   :group 'data
   :version "1.0")
 
-(defcustom glf-default-location-visibility-mode 'grayed-out
-  "Non nil means to show file location by default."
-  :type '(choice (const :tag "Invisible" :value invisible)
-                 (const :tag "Visible" :value visible)
+(defcustom glf-location-visibility-mode 'grayed-out
+  "Default style of the file location."
+  :type '(choice (const :tag "Visible" :value visible)
                  (const :tag "Grayed out" :value grayed-out))
   :group 'glf)
 
@@ -266,7 +266,7 @@
     (list
 
      ;; Location
-     (if (eq glf-default-location-visibility-mode 'grayed-out)
+     (if (eq glf-location-visibility-mode 'grayed-out)
          (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
        (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
 
@@ -316,7 +316,7 @@
       (set (make-local-variable 'glf-record-separator) (glf-get-header-value "RECORD_SEPARATOR" :char header 30))
       (set (make-local-variable 'glf-column-separator) (glf-get-header-value "COLUMN_SEPARATOR" :char header 124))
       (set (make-local-variable 'glf-escape-char) (glf-get-header-value "ESC_CHARACTER" :char header 27))
-      ;; ignore location: not a true column
+      ;; remove first column because it is the location and is not a real column
       (set (make-local-variable 'glf-columns) (cdr (glf-get-header-value "COLUMNS" :list header '() glf-column-separator)))
 
       (let ((nb-columns (length glf-columns)))
@@ -384,28 +384,6 @@
   "Search for previous error."
   (interactive)
   (glf-search-error 're-search-backward))
-
-(defun glf-goto-file ()
-  "Goto file and line that correspond to the current message"
-  (interactive)
-  (save-excursion
-    (glf-sync-infoline)
-    (forward-line -1)
-    (save-match-data
-      (if (looking-at glf-location-pattern)
-          (let ((pathfile (match-string-no-properties 1))
-                (lineno (string-to-number (match-string-no-properties 2))))
-            (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
-                   (filename (car (last pathparts)))
-                   (buffer (get-buffer filename)))
-              (if buffer
-                  (progn (switch-to-buffer-other-window buffer)
-                         (goto-char (point-min))
-                         (if (> lineno 1)
-                             (forward-line (- lineno 1)))
-                         (beginning-of-line))
-                (error "No buffer visiting %s" filename))))
-        (error "No location found on this line")))))
 
 (defun glf-forward-infoline ()
   "Move to next infoline"
@@ -507,6 +485,7 @@
 ;;;
 ;;; Indentation
 ;;;
+
 (defvar glf-indent-width 3 "Indentation size")
 
 (defsubst glf-find-overlays-specifying (prop)
@@ -764,24 +743,30 @@
 ;;;
 
 (defconst glf-invisible-location-alist
-  '((glf-location . t) (invisible . glf-location) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
+  '((glf-location . t) (invisible . t) (priority . 2) (isearch-open-invisible . glf-unset-invisible)))
 
 (defun glf-toggle-location-visibility ()
   "Show or hide location lines"
   (interactive)
-  (if glf-location-overlays
-      (progn
-	;; ?? could avoid destroying the overlays
-	(mapc (lambda (overlay) (delete-overlay overlay)) glf-location-overlays)
-	(setq glf-location-overlays nil))
+  (cond
+   ((null glf-location-overlays)
+    (setq glf-location-overlays (glf-make-hiding-overlays)
+	  glf-location-visible-p nil))
+   (glf-location-visible-p
+    (mapc (lambda (overlay) (overlay-put overlay 'invisible t)) glf-location-overlays)
+    (setq glf-location-visible-p nil))
+   (t
+    (mapc (lambda (overlay) (overlay-put overlay 'invisible nil)) glf-location-overlays)
+    (setq glf-location-visible-p t))))
 
+(defun glf-make-hiding-overlays ()
+  (save-excursion
     (goto-char glf-end-of-header-point)
     (glf-find-location-line)
 
-    (setq glf-location-overlays
-	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-location-alist)))
-		  (glf-find-regions 'forward-line
-				    'glf-find-location-line)))))
+    (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-location-alist)))
+	    (glf-find-regions 'forward-line
+			      'glf-find-location-line))))
 
 (defun glf-find-location-line ()
   (while (and (not (eobp))
@@ -789,87 +774,138 @@
     (forward-line 1)))
 
 ;;;
-;;; Open xml trace file with mouse
+;;; Visit referenced files: xml trace and code location
 ;;;
 
 (defun glf-jit-process (beg end)
-  (interactive "r")
   (goto-char beg)
   (while
-      (let ((lbp (line-beginning-position))
-            (lep (line-end-position)))
+      (let ((lep (line-end-position)))
 
-        (glf-link-file beg lep)
+        (glf-link-trace-file beg lep)
+	(glf-link-location beg lep)
+
         (let ((next (1+ lep)))
           (if (< next end)
               (goto-char next)
             nil)))))
 
-(defun glf-link-file (beg end)
+(defun glf-link-trace-file (beg end)
   "Define clickable text on XML trace file"
 
-  (while (search-forward-regexp
-          ; ?? could font lock for this pattern ?
-          ; ?? location should be clickable too
-          "TraceFile_Name:\\(.*\\.xml\\)"
-          ;"\\(?:\\.\\.\\|[a-zA-Z]:\\)?\\([\\/][- ~._()a-z0-9A-Z]*\\)+[\\/]"
-          end t)
+  (while (search-forward-regexp "TraceFile_Name:\\(.*\\.xml\\)" end t)
     (let*
         ((mbp (match-beginning 0))
          (path (match-string 1))
-         (validPath (glf-validate-path path)))
+         (validPath (glf-validate-trace-path path)))
 
-      (if validPath
-          (add-text-properties
-           mbp
-           (point)
-           `(mouse-face highlight
-                        help-echo "mouse-2: visit this file in other window"
-                        glf-linked-file ,validPath)) ))))
+      (when validPath
+	(let ((map (make-sparse-keymap)))
+	  (define-key map [mouse-2]        'glf-mouse-find-linked-file)
+	  (define-key map [follow-link]    'mouse-face) ;mouse-1 follows link
+	  (define-key map (kbd "RET")      'glf-find-linked-file)
 
-(defun glf-mouse-find-file-other-window (event)
-  "Visit the file or directory name you click on."
-  (interactive "e")
-  (let ((window (posn-window (event-end event)))
-        (pos (posn-point (event-end event)))
-        file)
-    (when (not (windowp window))
-        (error "No file chosen"))
-    (with-current-buffer (window-buffer window)
-      (setq file (get-text-property pos 'glf-linked-file))
+	  (add-text-properties mbp (point)
+			       `(mouse-face highlight keymap ,map
+					    help-echo "mouse-1: visit this file in other window"
+					    glf-linked-trace-file ,validPath)) )))))
 
-     (cond
-      ((null file)             (message "No file at this position"))
-      ((file-directory-p file) (select-window window)(dired-other-window file))
-      ((file-regular-p file)   (select-window window)(find-file-other-window file))
-      (t                       (message "File not found: %s" file))))))
-
-(defun glf-return-find-file-other-window ()
-  "Visit a file or a directory"
-  (interactive)
-  (let
-      ((file  (get-text-property (point) 'glf-linked-file)))
-      (cond
-       ((null file)             (message "No file at this position"))
-       ((file-directory-p file) (dired-other-window file))
-       ((file-regular-p file)   (find-file-other-window file))
-       (t                       (message "File not found: %s" file)))))
-
-(defun glf-validate-path (str)
+(defun glf-validate-trace-path (str)
   "Transform the input path into a valid one (if possible)"
   (if (file-exists-p str)
       str
-    ;; often, paths are malformed and must be fixed
+    ;; many paths are malformed and must be fixed
     (let* ((pattern "wicdztrace")
            (index  (string-match pattern str)))
       (if (null index)
           nil
         (setq str (substring str (+ 1 index (length pattern))))
         (setq str (concat (file-name-as-directory pattern) str))
+	str))))
 
-        (if (file-exists-p str)
-            str
-          nil)))))
+(defun glf-mouse-find-linked-file (event)
+  "Visit the file or directory name you click on."
+  (interactive "e")
+  (let ((window (posn-window (event-end event)))
+        (pos (posn-point (event-end event))))
+
+    (when (not (windowp window))
+        (error "No file chosen"))
+
+    (with-current-buffer (window-buffer window)
+      (select-window window)
+      (glf-find-linked-file pos))))
+
+(defun glf-find-linked-file (&optional position)
+  "Visit a file or a directory"
+  (interactive)
+  (let
+      ((file (get-text-property (or position (point)) 'glf-linked-trace-file)))
+    (cond
+     ((null file)             (message "No file at this position"))
+     ((file-directory-p file) (dired-other-window file))
+     ((file-regular-p file)   (find-file-other-window file))
+     (t                       (message "File not found: %s" file)))))
+
+(defun glf-link-location (beg end)
+  "Define clickable text on location"
+  (while (search-forward-regexp glf-location-pattern end t)
+    (let*
+        ((mbp (match-beginning 0))
+         (path (match-string 1)))
+
+      (let ((map (make-sparse-keymap)))
+	(define-key map [mouse-2]        'glf-mouse-find-linked-location)
+	(define-key map [follow-link]    'mouse-face) ;mouse-1 follows link
+	(define-key map (kbd "RET")      'glf-find-linked-location)
+
+      (add-text-properties mbp (point)
+			   `(mouse-face highlight keymap ,map
+					help-echo "mouse-1: jump to this buffer and line")) ))))
+
+(defun glf-mouse-find-linked-location (event)
+  "Visit the location you click on."
+  (interactive "e")
+  (let ((window (posn-window (event-end event)))
+        (pos (posn-point (event-end event))))
+
+    (when (not (windowp window))
+        (error "No link to follow"))
+
+    (with-current-buffer (window-buffer window)
+      (select-window window)
+      (glf-find-linked-location))))
+
+(defun glf-find-linked-location ()
+  (interactive)
+  (beginning-of-line)
+  (glf-visit-location-at-point))
+
+(defun glf-find-source-file ()
+  "Goto file and line that correspond to the current message"
+  (interactive)
+  (save-excursion
+    (glf-sync-infoline)
+    (forward-line -1)
+    (glf-visit-location-at-point)))
+
+(defun glf-visit-location-at-point ()
+  (unless (looking-at glf-location-pattern)
+    (error "No location found"))
+
+  (let ((pathfile (match-string-no-properties 1))
+	(lineno (string-to-number (match-string-no-properties 2))))
+    (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
+	   (filename (car (last pathparts)))
+	   (buffer (get-buffer filename)))
+      (unless buffer
+	(error "No buffer visiting %s" filename))
+
+      (switch-to-buffer-other-window buffer)
+      (goto-char (point-min))
+      (if (> lineno 1)
+	  (forward-line (- lineno 1)))
+      (beginning-of-line))))
 
 ;;;
 ;;; keymap
@@ -879,12 +915,8 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "<C-next>")    'glf-next-error)
     (define-key map (kbd "<C-prior>")   'glf-previous-error)
-    (define-key map (kbd "C-c RET")     'glf-goto-file)
 
-    ;; open xml trace file
-    (define-key map [mouse-2]           'glf-mouse-find-file-other-window)
-    (define-key map (kbd "C-c C-v")     'glf-return-find-file-other-window)
-    (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
+    (define-key map (kbd "C-c RET")     'glf-find-source-file)
 
     (define-key map (kbd "<C-down>")    'glf-forward-paragraph)
     (define-key map (kbd "<C-up>")      'glf-backward-paragraph)
@@ -930,12 +962,8 @@
   (set (make-local-variable 'glf-collapse-all-p) nil)
   (add-to-invisibility-spec '(glf-collapse . t)) ;display as ellipsis
   ;; location visibility
-  (set (make-local-variable 'glf-location-visibility-mode) glf-default-location-visibility-mode)
   (set (make-local-variable 'glf-location-overlays) nil)
-  (add-to-invisibility-spec 'glf-location)
-
-  (if (eq glf-location-visibility-mode 'invisible)
-      (glf-toggle-location-visibility))
+  (set (make-local-variable 'glf-location-visible-p) t)
 
   (when (fboundp 'jit-lock-register)
     (jit-lock-register 'glf-jit-process)))
