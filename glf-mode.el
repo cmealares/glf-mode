@@ -11,8 +11,9 @@
 ;;      - move to next/previous thread paragraph;
 ;;      - move to next/previous paragraph in same thread.
 ;;    Collapse/expand paragraph
-;;    Indentation of nested scopes
-;;    Errors are indexed by IMenu: setup with (global-set-key [mouse-3] 'imenu)
+;;    Indent nested scopes
+;;    Goto xml trace file
+;;    Goto source code
 ;;
 ;;; Installation:
 ;;    Put this file on your load path.
@@ -777,13 +778,13 @@
 ;;;
 
 (defun glf-jit-process (beg end)
-  (interactive "r")
   (goto-char beg)
   (while
-      (let ((lbp (line-beginning-position)) ;??unused
-            (lep (line-end-position)))
+      (let ((lep (line-end-position)))
 
         (glf-link-trace-file beg lep)
+	(glf-link-location beg lep)
+
         (let ((next (1+ lep)))
           (if (< next end)
               (goto-char next)
@@ -799,12 +800,15 @@
          (validPath (glf-validate-trace-path path)))
 
       (when validPath
-	(add-text-properties
-	 mbp
-	 (point)
-	 `(mouse-face highlight
-		      help-echo "mouse-2: visit this file in other window"
-		      glf-linked-trace-file ,validPath)) ))))
+	(let ((map (make-sparse-keymap)))
+	  (define-key map [mouse-2]        'glf-mouse-find-linked-file)
+	  (define-key map [follow-link]    'mouse-face) ;mouse-1 follows link
+	  (define-key map (kbd "RET")      'glf-find-linked-file)
+
+	  (add-text-properties mbp (point)
+			       `(mouse-face highlight keymap ,map
+					    help-echo "mouse-1: visit this file in other window"
+					    glf-linked-trace-file ,validPath)) )))))
 
 (defun glf-validate-trace-path (str)
   "Transform the input path into a valid one (if possible)"
@@ -817,18 +821,17 @@
           nil
         (setq str (substring str (+ 1 index (length pattern))))
         (setq str (concat (file-name-as-directory pattern) str))
-
-        (if (file-exists-p str)
-            str
-          nil)))))
+	str))))
 
 (defun glf-mouse-find-linked-file (event)
   "Visit the file or directory name you click on."
   (interactive "e")
   (let ((window (posn-window (event-end event)))
         (pos (posn-point (event-end event))))
+
     (when (not (windowp window))
         (error "No file chosen"))
+
     (with-current-buffer (window-buffer window)
       (select-window window)
       (glf-find-linked-file pos))))
@@ -844,26 +847,65 @@
      ((file-regular-p file)   (find-file-other-window file))
      (t                       (message "File not found: %s" file)))))
 
-(defun glf-goto-file ()
+(defun glf-link-location (beg end)
+  "Define clickable text on location"
+  (while (search-forward-regexp glf-location-pattern end t)
+    (let*
+        ((mbp (match-beginning 0))
+         (path (match-string 1)))
+
+      (let ((map (make-sparse-keymap)))
+	(define-key map [mouse-2]        'glf-mouse-find-linked-location)
+	(define-key map [follow-link]    'mouse-face) ;mouse-1 follows link
+	(define-key map (kbd "RET")      'glf-find-linked-location)
+
+      (add-text-properties mbp (point)
+			   `(mouse-face highlight keymap ,map
+					help-echo "mouse-1: jump to this buffer and line")) ))))
+
+(defun glf-mouse-find-linked-location (event)
+  "Visit the location you click on."
+  (interactive "e")
+  (let ((window (posn-window (event-end event)))
+        (pos (posn-point (event-end event))))
+
+    (when (not (windowp window))
+        (error "No link to follow"))
+
+    (with-current-buffer (window-buffer window)
+      (select-window window)
+      (glf-find-linked-location))))
+
+(defun glf-find-linked-location ()
+  (interactive)
+  (beginning-of-line)
+  (glf-visit-location-at-point))
+
+(defun glf-find-source-file ()
   "Goto file and line that correspond to the current message"
   (interactive)
   (save-excursion
     (glf-sync-infoline)
     (forward-line -1)
-    (unless (looking-at glf-location-pattern)
-      (error "No location found on this line"))
-    (let ((pathfile (match-string-no-properties 1))
-	  (lineno (string-to-number (match-string-no-properties 2))))
-      (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
-	     (filename (car (last pathparts)))
-	     (buffer (get-buffer filename)))
-	(if buffer
-	    (progn (switch-to-buffer-other-window buffer)
-		   (goto-char (point-min))
-		   (if (> lineno 1)
-		       (forward-line (- lineno 1)))
-		   (beginning-of-line))
-	  (error "No buffer visiting %s" filename))))))
+    (glf-visit-location-at-point)))
+
+(defun glf-visit-location-at-point ()
+  (unless (looking-at glf-location-pattern)
+    (error "No location found"))
+
+  (let ((pathfile (match-string-no-properties 1))
+	(lineno (string-to-number (match-string-no-properties 2))))
+    (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
+	   (filename (car (last pathparts)))
+	   (buffer (get-buffer filename)))
+      (unless buffer
+	(error "No buffer visiting %s" filename))
+
+      (switch-to-buffer-other-window buffer)
+      (goto-char (point-min))
+      (if (> lineno 1)
+	  (forward-line (- lineno 1)))
+      (beginning-of-line))))
 
 ;;;
 ;;; keymap
@@ -873,12 +915,8 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "<C-next>")    'glf-next-error)
     (define-key map (kbd "<C-prior>")   'glf-previous-error)
-    (define-key map (kbd "C-c RET")     'glf-goto-file)
 
-    ;; open xml trace file
-    (define-key map [mouse-2]           'glf-mouse-find-linked-file)
-    (define-key map (kbd "C-c C-v")     'glf-find-linked-file)
-    (define-key map [follow-link]       'mouse-face) ;mouse-1 follows link
+    (define-key map (kbd "C-c RET")     'glf-find-source-file)
 
     (define-key map (kbd "<C-down>")    'glf-forward-paragraph)
     (define-key map (kbd "<C-up>")      'glf-backward-paragraph)
