@@ -120,9 +120,8 @@
 ;;;
 
 (defconst glf-background-colors
-  '("cornsilk"
+  '("lavender"
     "misty rose"
-    "lavender"
     "lemon chiffon"
     "seashell"
     "sky blue"
@@ -139,7 +138,8 @@
     "tan"
     "rosy brown"
     "plum"
-    "pink")
+    "pink"
+    "cornsilk")
   "Colors for backgrounds of threads.")
 
 (defun glf-make-thread-face (tid)
@@ -221,7 +221,7 @@
     (dolist (spec glf-font-lock-column-specification (nreverse res))
       (let ((font (cdr spec))
             (invisible-face '(list 'face 'default 'invisible t))
-            ;;(invisible-face 'glf-light-text-face)
+	    ;;(invisible-face 'glf-light-text-face) ; for debug
             )
         (when font
           (setq res (cons (list index
@@ -240,26 +240,27 @@
   (if (not (re-search-forward "^|" search-limit t))
       nil
     (catch 'badmatch
+      (backward-char 1)
       (let ((matchlist (list search-limit (point))))
         (dolist (spec speclist)
-          (let* ((count (car spec))
-                 (face (cdr spec))
-                 (match (if (null face)
-                            (skip-column search-limit count)
-                          (search-column search-limit count (eq face :invisible)))))
-            (when match
-              (setq matchlist (cons (cadr match) (cons (car match) matchlist))))))
+          (let ((count (car spec))
+		(face (cdr spec)))
+	    (if (null face)
+		(skip-column search-limit count)
+	      (let ((match (search-column search-limit count (eq face :invisible))))
+		(when match
+		  (setq matchlist (cons (cadr match) (cons (car match) matchlist))))))))
         (nreverse matchlist)))))
 
 (defun search-column (search-limit count isInvisible)
   (let
-      ((begin (if isInvisible (1- (point)) (point)))
-       (end (re-search-forward glf-end-column-pattern search-limit t count)))
+      ((begin (if isInvisible (point) (1+ (point))))
+       (end (re-search-forward glf-column-pattern search-limit t count)))
     (unless end (throw 'badmatch nil))
-    (list begin (1- end))))
+    (list begin end)))
 
 (defun skip-column (search-limit count)
-  (unless (re-search-forward glf-end-column-pattern search-limit t count)
+  (unless (re-search-forward glf-column-pattern search-limit t count)
     (throw 'badmatch nil)))
 
 (defun glf-font-lock-keywords ()
@@ -352,7 +353,7 @@
   (beginning-of-line)
   (if (zerop n)
       t
-    (search-forward (format "%c" glf-column-separator) (line-end-position) t (1+ n))))
+    (search-forward (format "%c" glf-column-separator) (line-end-position) t (1+ n)))) ;??
 
 (defun glf-read-column (name)
   "Read column value on current column line. Caller must set position on a column line."
@@ -360,7 +361,7 @@
     (beginning-of-line)
 
     (let ((index (gethash name glf-column-indexes-map))
-          (separator (format "%c" glf-column-separator)))
+          (separator (format "%c" glf-column-separator)));??
       (if (null index)
           (error "Unknown column name: %s" name)
 
@@ -490,14 +491,14 @@
 
 (defvar glf-indent-width 3 "Indentation size")
 
-(defsubst glf-find-overlays-specifying (prop)
+(defun glf-find-overlays-specifying (prop)
   (let ((result))
     (dolist (ov (overlays-at (point)) result)
       (if (overlay-get ov prop)
           (setq result (cons ov result))))
     result))
 
-(defsubst glf-read-depth ()
+(defun glf-read-depth ()
   "Read depth of current log line"
   (let
       ((depth (string-to-number (glf-read-column "MinorDepth")))
@@ -507,7 +508,7 @@
        ((equal scope "}")  (1- depth))
        (t                  depth))))
 
-(defsubst glf-search-indenter ()
+(defun glf-search-indenter ()
   "Move to indenter overlay of current line and read it"
 
   (let ((index (gethash "Text" glf-column-indexes-map)))
@@ -524,7 +525,7 @@
   (overlay-put overlay 'priority 0)
   (overlay-put overlay 'before-string (make-string (* (max 0 size) glf-indent-width) ?\ )))
 
-(defsubst glf-indent-line ()
+(defun glf-indent-line ()
   "Indent current line"
   (interactive)
   (when (save-excursion
@@ -795,7 +796,7 @@
 (defun glf-link-trace-file (beg end)
   "Define clickable text on XML trace file"
 
-  (while (search-forward-regexp "TraceFile_Name:\\(.*\\.xml\\)" end t)
+  (while (re-search-forward "TraceFile_Name:\\(.*\\.xml\\)" end t)
     (let*
         ((mbp (match-beginning 0))
          (path (match-string 1))
@@ -851,7 +852,7 @@
 
 (defun glf-link-location (beg end)
   "Define clickable text on location"
-  (while (search-forward-regexp glf-location-pattern end t)
+  (while (re-search-forward glf-location-pattern end t)
     (let*
         ((mbp (match-beginning 0))
          (path (match-string 1)))
@@ -941,6 +942,9 @@
   "Keymap for `glf-mode' mode")
 
 
+(defun glf-regexp-quote-char (c)
+  (regexp-quote (char-to-string c)))
+
 ;;;###autoload
 (define-derived-mode glf-mode fundamental-mode "glf"
   "Major mode for viewing GLF files."
@@ -949,7 +953,11 @@
   (use-local-map glf-mode-map)
 
   ;; patterns
-  (set (make-local-variable 'glf-end-column-pattern) (format "%c\\|$" glf-column-separator))
+  ;;(setq glf-column-pattern (format "|\\(?:.\\|[^|\n]\\)*"
+  (set (make-local-variable 'glf-column-pattern) (format "%s\\(?:%s.\\|[^%s\n]\\)*"
+							 (glf-regexp-quote-char glf-column-separator)
+							 (glf-regexp-quote-char glf-escape-char)
+							 (glf-regexp-quote-char glf-column-separator)))
   (set (make-local-variable 'glf-location-pattern) (format "^\\([^%c][^:\r\n]+\\):\\([[:digit:]]+\\):" glf-column-separator))
   (set (make-local-variable 'glf-infoline-pattern) (format "^%c[a-f0-9\-]+%c" glf-column-separator glf-column-separator))
   ;; font-lock
