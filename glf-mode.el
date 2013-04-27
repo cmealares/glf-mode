@@ -1,5 +1,7 @@
 ;;; glf-mode.el -- major mode for viewing GLF log files
 ;;
+;; Copyright (C) 2011-2013 Christophe Mealares
+;;
 ;;; Authors:
 ;;     Christophe Mealares
 ;;     Laurent P
@@ -643,7 +645,7 @@
   (interactive
    (if (null glf-thread-overlays)
        (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
-         (list (read-string "Focus on thread: " current)))
+         (list (read-string (format "Focus on thread (default %s): " current) nil nil current)))
      (list nil)))
 
   (if tid
@@ -898,14 +900,17 @@
     (let* ((pathparts (split-string pathfile "[\\/\\\\]"))
 	   (filename (car (last pathparts)))
 	   (buffer (get-buffer filename)))
-      (unless buffer
-	(error "No buffer visiting %s" filename))
 
-      (switch-to-buffer-other-window buffer)
-      (goto-char (point-min))
-      (if (> lineno 1)
-	  (forward-line (- lineno 1)))
-      (beginning-of-line))))
+      (if buffer
+	  (progn
+	    (switch-to-buffer-other-window buffer)
+	    (goto-char (point-min))
+	    (if (> lineno 1)
+		(forward-line (- lineno 1)))
+	    (beginning-of-line))
+	(if (y-or-n-p (format "%s: buffer not found. Run file search? " filename))
+	    (find-name-dired (read-directory-name "Search in directory: ")
+			     filename))))))
 
 ;;;
 ;;; keymap
