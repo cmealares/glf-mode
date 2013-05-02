@@ -348,30 +348,32 @@
 ;;; Movements
 ;;;
 
+(defsubst glf-get-index (column-name)
+  (let ((index (gethash column-name glf-column-indexes-map)))
+    (if index
+	index
+      (error "Unknown column name: %s" column-name))))
+
 (defsubst glf-goto-field (n)
   "Move to nth field of the current infoline. Counting starts at 0."
   (beginning-of-line)
   (if (zerop n)
       t
-    (search-forward (format "%c" glf-column-separator) (line-end-position) t (1+ n)))) ;??
+    (search-forward (format "%c" glf-column-separator) (line-end-position) t (1+ n))))
 
-(defun glf-read-column (name)
+(defun glf-read-column (col-index)
   "Read column value on current column line. Caller must set position on a column line."
   (save-excursion
     (beginning-of-line)
 
-    (let ((index (gethash name glf-column-indexes-map))
-          (separator (format "%c" glf-column-separator)));??
-      (if (null index)
-          (error "Unknown column name: %s" name)
-
+    (let ((separator (format "%c" glf-column-separator)))
         (let
-            ((start-pos (search-forward separator (line-end-position) t (1+ index)))
+            ((start-pos (search-forward separator (line-end-position) t (1+ col-index)))
              (end-pos (search-forward separator (line-end-position) t 1)))
           (if (null start-pos)
               nil
             (buffer-substring-no-properties start-pos
-                                            (1- (if (null end-pos) (line-end-position) end-pos)))) )))))
+                                            (1- (if (null end-pos) (line-end-position) end-pos)))) ))))
 
 (defun glf-search-error (search-fun)
   (unless (apply search-fun
@@ -419,9 +421,9 @@
   ;; in other words: go to first line of next paragraph
   (interactive)
   (glf-sync-infoline)
-  (let ((tid (glf-read-column "ThreadID")))
+  (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (eobp))
-                (equal tid (glf-read-column "ThreadID")))
+                (equal tid (glf-read-column glf-thread-index)))
       (glf-forward-infoline))
     (when (interactive-p)
       (message "Reached end of paragraph %s" tid))))
@@ -431,9 +433,9 @@
   ;; go to first line of current paragraph
   (interactive)
   (glf-backward-infoline)
-  (let ((tid (glf-read-column "ThreadID")))
+  (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (bobp))
-                (equal tid (glf-read-column "ThreadID")))
+                (equal tid (glf-read-column glf-thread-index)))
       (glf-backward-infoline))
     (glf-forward-infoline)
     (when (interactive-p)
@@ -441,8 +443,8 @@
 
 (defun glf-beginning-of-paragraph ()
   (glf-sync-infoline)
-  (let ((tid (glf-read-column "ThreadID"))
-        (previous (save-excursion (glf-backward-infoline) (glf-read-column "ThreadID"))))
+  (let ((tid (glf-read-column glf-thread-index))
+        (previous (save-excursion (glf-backward-infoline) (glf-read-column glf-thread-index))))
     (when (equal tid previous)
       (glf-backward-paragraph))))
 
@@ -458,14 +460,14 @@
   (interactive)
   (glf-sync-infoline)
   (let ((origin (point))
-        (tid (glf-read-column "ThreadID")))
+        (tid (glf-read-column glf-thread-index)))
 
     (while (progn
              (glf-forward-infoline)
              (and (not (eobp))
-                  (not (equal tid (glf-read-column "ThreadID"))))))
+                  (not (equal tid (glf-read-column glf-thread-index))))))
 
-    (unless (equal tid (glf-read-column "ThreadID"))
+    (unless (equal tid (glf-read-column glf-thread-index))
       (message "Thread %s ends here" tid)
       (goto-char origin))))
 
@@ -474,14 +476,14 @@
   (interactive)
   (glf-sync-infoline)
   (let ((origin (point))
-        (tid (glf-read-column "ThreadID")))
+        (tid (glf-read-column glf-thread-index)))
 
     (while (progn
              (glf-backward-infoline)
              (and (not (bobp))
-                  (not (equal tid (glf-read-column "ThreadID"))))))
+                  (not (equal tid (glf-read-column glf-thread-index))))))
 
-    (unless (equal tid (glf-read-column "ThreadID"))
+    (unless (equal tid (glf-read-column glf-thread-index))
       (message "Thread %s starts here" tid)
       (goto-char origin))))
 
@@ -501,8 +503,8 @@
 (defun glf-read-depth ()
   "Read depth of current log line"
   (let
-      ((depth (string-to-number (glf-read-column "MinorDepth")))
-       (scope (glf-read-column "ScopeTag")))
+      ((depth (string-to-number (glf-read-column (glf-get-index "MinorDepth"))))
+       (scope (glf-read-column (glf-get-index "ScopeTag"))))
       (cond
        ((equal scope "{")  (1- depth))
        ((equal scope "}")  (1- depth))
@@ -511,8 +513,7 @@
 (defun glf-search-indenter ()
   "Move to indenter overlay of current line and read it"
 
-  (let ((index (gethash "Text" glf-column-indexes-map)))
-    (glf-goto-field index))
+  (glf-goto-field (glf-get-index "Text"))
 
   (let ((indenters (glf-find-overlays-specifying  'glf-indent)))
     (if (null indenters)
@@ -645,7 +646,7 @@
   "Display only the given thread or display them all if given a nil parameter"
   (interactive
    (if (null glf-thread-overlays)
-       (let ((current (progn (glf-sync-infoline) (glf-read-column "ThreadID"))))
+       (let ((current (progn (glf-sync-infoline) (glf-read-column glf-thread-index))))
          (list (read-string (format "Focus on thread (default %s): " current) nil nil current)))
      (list nil)))
 
@@ -675,7 +676,7 @@
 (defun glf-find-paragraph-not-on-thread (tid)
   "Find the next paragraph that do not belong to the given thread or stay at current position"
   (while (and (not (eobp))
-	      (string= tid (save-excursion (glf-sync-infoline)(glf-read-column "ThreadID"))))
+	      (string= tid (save-excursion (glf-sync-infoline)(glf-read-column glf-thread-index))))
     (glf-end-of-paragraph)))
 
 (defun glf-overlay-region (start end alist)
@@ -952,6 +953,8 @@
 
   (use-local-map glf-mode-map)
 
+  ;; pre-compute indexes that are used a lot
+  (set (make-local-variable 'glf-thread-index) (glf-get-index "ThreadID"))
   ;; patterns
   ;;(setq glf-column-pattern (format "|\\(?:.\\|[^|\n]\\)*"
   (set (make-local-variable 'glf-column-pattern) (format "%s\\(?:%s.\\|[^%s\n]\\)*"
