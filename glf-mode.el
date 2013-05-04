@@ -811,7 +811,7 @@
 
 	  (add-text-properties mbp (point)
 			       `(mouse-face highlight keymap ,map
-					    help-echo "mouse-1: visit this file in other window"
+					    help-echo "mouse-1 / RET: visit this file in other window"
 					    glf-linked-trace-file ,validPath)) )))))
 
 (defun glf-validate-trace-path (str)
@@ -865,7 +865,7 @@
 
       (add-text-properties mbp (point)
 			   `(mouse-face highlight keymap ,map
-					help-echo "mouse-1: jump to this buffer and line")) ))))
+					help-echo "mouse-1 / RET: jump to this buffer and line")) ))))
 
 (defun glf-mouse-find-linked-location (event)
   "Visit the location you click on."
