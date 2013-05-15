@@ -6,7 +6,24 @@
 ;;     Christophe Mealares
 ;;     Laurent P
 ;;
+
+;;; License:
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 ;;; Main features:
+;;
 ;;    Syntax coloration
 ;;    Focus on a particular thread by hiding others
 ;;    Thread navigation:
@@ -16,8 +33,9 @@
 ;;    Indent nested scopes
 ;;    Goto xml trace file
 ;;    Goto source code
-;;
+
 ;;; Installation:
+;;
 ;;    Put this file on your load path.
 ;;    Then add the following lines to your Emacs initialization file:
 ;;
@@ -811,7 +829,7 @@
 
 	  (add-text-properties mbp (point)
 			       `(mouse-face highlight keymap ,map
-					    help-echo "mouse-1: visit this file in other window"
+					    help-echo "mouse-1 / RET: visit this file in other window"
 					    glf-linked-trace-file ,validPath)) )))))
 
 (defun glf-validate-trace-path (str)
@@ -865,7 +883,7 @@
 
       (add-text-properties mbp (point)
 			   `(mouse-face highlight keymap ,map
-					help-echo "mouse-1: jump to this buffer and line")) ))))
+					help-echo "mouse-1 / RET: jump to this buffer and line")) ))))
 
 (defun glf-mouse-find-linked-location (event)
   "Visit the location you click on."
