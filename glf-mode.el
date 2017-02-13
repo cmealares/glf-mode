@@ -339,15 +339,23 @@
       (set (make-local-variable 'glf-column-separator) (glf-get-header-value "COLUMN_SEPARATOR" :char header 124))
       (set (make-local-variable 'glf-escape-char) (glf-get-header-value "ESC_CHARACTER" :char header 27))
 
+      (set (make-local-variable 'glf-column-separator-as-string) (char-to-string glf-column-separator))
+
       (let ((cols (glf-get-header-value "COLUMNS" :string header "Location|Guid|Time|Tzone|Trace|Log|Importance|Severity|Exception|DeviceName|ProcessID|ThreadID|ThreadName|ScopeTag|MajorTick|MinorTick|MajorDepth|MinorDepth|RootName|RootID|CallerName|CallerID|CalleeName|CalleeID|ActionID|DSRRootContextID|DSRTransaction|DSRConnection|DSRCounter|User|ArchitectComponent|DeveloperComponent|Administrator|Unit|CSNComponent|Text")))
 
         ;; remove first column because it is the location and is not a real column
-        (set (make-local-variable 'glf-columns) (cdr (split-string cols (char-to-string glf-column-separator))))
+        (set (make-local-variable 'glf-columns) (cdr (split-string cols glf-column-separator-as-string)))
 
         (let ((nb-columns (length glf-columns)))
           (set (make-local-variable 'glf-column-indexes-map) (make-hash-table :test 'equal :weakness t :size nb-columns))
           (dotimes (i nb-columns)
             (puthash (nth i glf-columns) i glf-column-indexes-map))))
+
+      ;; pre-compute some indexes
+      (set (make-local-variable 'glf-thread-index) (glf-get-index "ThreadID"))
+      (set (make-local-variable 'glf-text-index) (glf-get-index "Text"))
+      (set (make-local-variable 'glf-minor-depth-index) (glf-get-index "MinorDepth"))
+      (set (make-local-variable 'glf-scope-tag-index) (glf-get-index "ScopeTag"))
       )))
 
 (defun glf-test ()
@@ -381,21 +389,20 @@
   (beginning-of-line)
   (if (zerop n)
       t
-    (search-forward (format "%c" glf-column-separator) (line-end-position) t (1+ n))))
+    (search-forward glf-column-separator-as-string (line-end-position) t (1+ n))))
 
 (defun glf-read-column (col-index)
   "Read column value on current column line. Caller must set position on a column line."
   (save-excursion
     (beginning-of-line)
 
-    (let ((separator (format "%c" glf-column-separator)))
-        (let
-            ((start-pos (search-forward separator (line-end-position) t (1+ col-index)))
-             (end-pos (search-forward separator (line-end-position) t 1)))
-          (if (null start-pos)
-              nil
-            (buffer-substring-no-properties start-pos
-                                            (1- (if (null end-pos) (line-end-position) end-pos)))) ))))
+    (let
+	((start-pos (search-forward glf-column-separator-as-string (line-end-position) t (1+ col-index)))
+	 (end-pos (search-forward glf-column-separator-as-string (line-end-position) t 1)))
+      (if (null start-pos)
+	  nil
+	(buffer-substring-no-properties start-pos
+					(1- (if (null end-pos) (line-end-position) end-pos)))) )))
 
 (defun glf-search-error (search-fun)
   (unless (apply search-fun
@@ -525,8 +532,8 @@
 (defun glf-read-depth ()
   "Read depth of current log line"
   (let
-      ((depth (string-to-number (glf-read-column (glf-get-index "MinorDepth"))))
-       (scope (glf-read-column (glf-get-index "ScopeTag"))))
+      ((depth (string-to-number (glf-read-column glf-minor-depth-index)))
+       (scope (glf-read-column glf-scope-tag-index)))
       (cond
        ((equal scope "{")  (1- depth))
        ((equal scope "}")  (1- depth))
@@ -535,7 +542,7 @@
 (defun glf-search-indenter ()
   "Move to indenter overlay of current line and read it"
 
-  (glf-goto-field (glf-get-index "Text"))
+  (glf-goto-field glf-text-index)
 
   (let ((indenters (glf-find-overlays-specifying  'glf-indent)))
     (if (null indenters)
@@ -975,10 +982,7 @@
 
   (use-local-map glf-mode-map)
 
-  ;; pre-compute indexes that are used a lot
-  (set (make-local-variable 'glf-thread-index) (glf-get-index "ThreadID"))
   ;; patterns
-  ;;(setq glf-column-pattern (format "|\\(?:.\\|[^|\n]\\)*"
   (set (make-local-variable 'glf-column-pattern) (format "%s\\(?:%s.\\|[^%s\n]\\)*"
 							 (glf-regexp-quote-char glf-column-separator)
 							 (glf-regexp-quote-char glf-escape-char)
