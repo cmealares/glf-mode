@@ -169,9 +169,8 @@
              (facename (make-symbol (concat "glf-" (subst-char-in-string ?\s ?- color) "-face")))
              (face (make-face facename)))
         (when (not (face-background face))
-          (setq glf-next-background-color (1+ glf-next-background-color))
-          (when (>= glf-next-background-color (length glf-background-colors))
-            (setq glf-next-background-color 0))
+          (setq glf-next-background-color
+                (if (= glf-next-background-color (- (length glf-background-colors) 1)) 0 (1+ glf-next-background-color)))
           (set-face-background face color))
         (puthash tid face glf-thread-faces-map))))
 
@@ -244,9 +243,7 @@
 	    ;;(invisible-face 'glf-light-text-face) ; for debug
             )
         (when font
-          (setq res (cons (list index
-                                (if (eq font :invisible) invisible-face font))
-                          res))
+          (push (list index (if (eq font :invisible) invisible-face font)) res)
           (setq index (1+ index)))))))
 
 (defun glf-column-matcher (search-limit)
@@ -270,7 +267,6 @@
 	      (let ((match (search-column search-limit count (eq face :invisible))))
 		(when match
 		  (setq matchlist (cons (cadr match) (cons (car match) matchlist))))))))
-        (nreverse matchlist)))))
 
 (defun search-column (search-limit count isInvisible)
   (let
@@ -515,6 +511,19 @@
     (unless (equal tid (glf-read-column glf-thread-index))
       (message "Thread %s starts here" tid)
       (goto-char origin))))
+
+(defun glf-next-pid ()
+  "Find process break"
+  (interactive)
+  (glf-sync-infoline)
+  (let* ((pid-index (glf-get-index "ProcessID"))
+         (pid (glf-read-column pid-index)))
+
+   (while (progn
+             (glf-forward-infoline)
+             (and (not (eobp))
+                  (equal pid (glf-read-column pid-index)))))
+   (message "Process %s ends here" pid) ))
 
 ;;;
 ;;; Indentation
@@ -951,6 +960,8 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "<C-next>")    'glf-next-error)
     (define-key map (kbd "<C-prior>")   'glf-previous-error)
+
+    (define-key map (kbd "C-c C-p")     'glf-next-pid)
 
     (define-key map (kbd "C-c RET")     'glf-find-source-file)
 
