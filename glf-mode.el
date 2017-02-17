@@ -267,6 +267,7 @@
 	      (let ((match (search-column search-limit count (eq face :invisible))))
 		(when match
 		  (setq matchlist (cons (cadr match) (cons (car match) matchlist))))))))
+        (nreverse matchlist)))))
 
 (defun search-column (search-limit count isInvisible)
   (let
