@@ -357,7 +357,6 @@
 
 (defun glf-test ()
   "Print the result of some reading functions"
-  (interactive)
   (with-output-to-temp-buffer "*glf-test*"
 
     (print "*** Variables")
@@ -376,17 +375,14 @@
 ;;;
 
 (defsubst glf-get-index (column-name)
-  (let ((index (gethash column-name glf-column-indexes-map)))
-    (if index
-	index
-      (error "Unknown column name: %s" column-name))))
+  (or (gethash column-name glf-column-indexes-map)
+      (error "Unknown column name: %s" column-name)))
 
 (defsubst glf-goto-field (n)
   "Move to nth field of the current infoline. Counting starts at 0."
   (beginning-of-line)
-  (if (zerop n)
-      t
-    (search-forward glf-column-separator-as-string (line-end-position) t (1+ n))))
+  (or (zerop n)
+      (search-forward glf-column-separator-as-string (line-end-position) t (1+ n))))
 
 (defun glf-read-column (col-index)
   "Read column value on current column line. Caller must set position on a column line."
@@ -418,33 +414,29 @@
 
 (defun glf-forward-infoline ()
   "Move to next infoline"
-  (beginning-of-line)
-  (forward-line)
-  (while (and (not (eobp))
-              (not (looking-at glf-infoline-pattern)))
-    (forward-line)))
+  (end-of-line)
+  (forward-char)
+  (if (re-search-forward glf-infoline-pattern nil t)
+      (beginning-of-line)
+    (goto-char (point-max)) ))
 
 (defun glf-backward-infoline ()
   "Move to previous infoline"
-  (beginning-of-line)
   (forward-line -1)
-  (while (and (not (bobp))
-              (not (looking-at glf-infoline-pattern)))
-    (forward-line -1)))
+  (unless (re-search-backward glf-infoline-pattern nil t)
+      (beginning-of-line)))
 
 (defun glf-sync-infoline ()
   "Move to infoline of current record"
   (beginning-of-line)
-  (when (not (looking-at glf-infoline-pattern))
-    (if (looking-at glf-location-pattern)
-        (forward-line 1)
-      (while (and (not (bobp))
-                  (not (looking-at glf-infoline-pattern)))
-        (forward-line -1)))))
+  (if (looking-at glf-location-pattern)
+      (forward-line 1)
+    (while (and (not (bobp))
+                (not (looking-at glf-infoline-pattern)))
+      (forward-line -1))))
 
-(defun glf-forward-paragraph ()
+(defun glf-end-of-paragraph ()
   "Move to end of thread paragraph."
-  ;; in other words: go to first line of next paragraph
   (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
@@ -454,32 +446,18 @@
     (when (interactive-p)
       (message "Reached end of paragraph %s" tid))))
 
-(defun glf-backward-paragraph ()
+(defun glf-beginning-of-paragraph ()
   "Move backward to start of thread paragraph."
-  ;; go to first line of current paragraph
   (interactive)
-  (glf-backward-infoline)
+  (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (bobp))
                 (equal tid (glf-read-column glf-thread-index)))
       (glf-backward-infoline))
     (glf-forward-infoline)
+
     (when (interactive-p)
       (message "Reached beginning of paragraph %s" tid))))
-
-(defun glf-beginning-of-paragraph ()
-  (glf-sync-infoline)
-  (let ((tid (glf-read-column glf-thread-index))
-        (previous (save-excursion (glf-backward-infoline) (glf-read-column glf-thread-index))))
-    (when (equal tid previous)
-      (glf-backward-paragraph))))
-
-(defun glf-end-of-paragraph ()
-  (glf-forward-paragraph)
-  (when (not (eobp))
-    (forward-line -1)
-    (unless (looking-at glf-location-pattern)
-      (forward-line 1))))
 
 (defun glf-forward-thread ()
   "Go to the next line of same thread"
@@ -488,14 +466,19 @@
   (let ((origin (point))
         (tid (glf-read-column glf-thread-index)))
 
-    (while (progn
-             (glf-forward-infoline)
-             (and (not (eobp))
-                  (not (equal tid (glf-read-column glf-thread-index))))))
+    (glf-forward-infoline)
 
-    (unless (equal tid (glf-read-column glf-thread-index))
-      (message "Thread %s ends here" tid)
-      (goto-char origin))))
+    (if (equal tid (glf-read-column glf-thread-index))
+        (progn (glf-end-of-paragraph) (forward-line -1))
+
+      (while (progn
+               (glf-forward-infoline)
+               (and (not (eobp))
+                    (not (equal tid (glf-read-column glf-thread-index))))))
+
+      (unless (equal tid (glf-read-column glf-thread-index))
+        (message "Thread %s ends here" tid)
+        (goto-char origin)))) )
 
 (defun glf-backward-thread ()
   "Go to the previous line of same thread"
@@ -750,7 +733,6 @@
           (end (save-excursion (glf-end-of-paragraph) (point))))
       (glf-collapse-region beg end))))
 
-
 (defun glf-collapse-region (beg end &optional collapse-p)
   "Collapse or expand the given region"
   (goto-char beg)
@@ -762,7 +744,6 @@
            (collapse-p (or (not (null collapse-p))
                            (not (and overlay
                                      (overlay-get overlay 'invisible))))))
-
       (if collapse-p
           (if overlay
                (overlay-put overlay 'invisible 'glf-collapse)
@@ -966,8 +947,8 @@
 
     (define-key map (kbd "C-c RET")     'glf-find-source-file)
 
-    (define-key map (kbd "<C-down>")    'glf-forward-paragraph)
-    (define-key map (kbd "<C-up>")      'glf-backward-paragraph)
+    (define-key map (kbd "<C-down>")    'glf-end-of-paragraph)
+    (define-key map (kbd "<C-up>")      'glf-beginning-of-paragraph)
 
     (define-key map (kbd "<M-down>")    'glf-forward-thread)
     (define-key map (kbd "<M-up>")      'glf-backward-thread)
