@@ -422,9 +422,10 @@
 
 (defun glf-backward-infoline ()
   "Move to previous infoline"
-  (forward-line -1)
-  (unless (re-search-backward glf-infoline-pattern nil t)
-      (beginning-of-line)))
+  (beginning-of-line)
+  (if (re-search-backward glf-infoline-pattern nil t)
+      (beginning-of-line)
+    (goto-char (point-min))))
 
 (defun glf-sync-infoline ()
   "Move to infoline of current record"
@@ -469,16 +470,16 @@
     (glf-forward-infoline)
 
     (if (equal tid (glf-read-column glf-thread-index))
-        (progn (glf-end-of-paragraph) (forward-line -1))
+        (progn (glf-end-of-paragraph)
+               (glf-backward-infoline))
 
       (while (progn
                (glf-forward-infoline)
                (and (not (eobp))
                     (not (equal tid (glf-read-column glf-thread-index))))))
-
       (unless (equal tid (glf-read-column glf-thread-index))
         (message "Thread %s ends here" tid)
-        (goto-char origin)))) )
+        (goto-char origin)))))
 
 (defun glf-backward-thread ()
   "Go to the previous line of same thread"
@@ -487,14 +488,17 @@
   (let ((origin (point))
         (tid (glf-read-column glf-thread-index)))
 
-    (while (progn
-             (glf-backward-infoline)
-             (and (not (bobp))
-                  (not (equal tid (glf-read-column glf-thread-index))))))
+    (glf-backward-infoline)
 
-    (unless (equal tid (glf-read-column glf-thread-index))
-      (message "Thread %s starts here" tid)
-      (goto-char origin))))
+    (if (equal tid (glf-read-column glf-thread-index))
+        (glf-beginning-of-paragraph)
+
+      (while (and (not (bobp))
+                  (not (equal tid (glf-read-column glf-thread-index))))
+        (glf-backward-infoline))
+      (unless (equal tid (glf-read-column glf-thread-index))
+        (message "Thread %s starts here" tid)
+        (goto-char origin)))))
 
 (defun glf-next-pid ()
   "Find process break"
@@ -947,11 +951,11 @@
 
     (define-key map (kbd "C-c RET")     'glf-find-source-file)
 
-    (define-key map (kbd "<C-down>")    'glf-end-of-paragraph)
-    (define-key map (kbd "<C-up>")      'glf-beginning-of-paragraph)
+    (define-key map (kbd "<C-down>")    'glf-forward-thread)
+    (define-key map (kbd "<C-up>")      'glf-backward-thread)
 
-    (define-key map (kbd "<M-down>")    'glf-forward-thread)
-    (define-key map (kbd "<M-up>")      'glf-backward-thread)
+;;    (define-key map (kbd "<M-down>")    'glf-forward-thread)
+;;    (define-key map (kbd "<M-up>")      'glf-backward-thread)
 
     (define-key map (kbd "C-c C-f")     'glf-toggle-thread-focus)
 
