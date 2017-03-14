@@ -221,10 +221,10 @@
         (colspec glf-font-lock-column-specification))
 
     (while (and colspec (> tidIndex 0))
-      (let ((colCount (caar colspec)))
-        (setq tidIndex (- tidIndex colCount))
-        (setq i (1+ i))
-        (setq colspec (cdr colspec))) )
+        (let ((colCount (caar colspec)))
+          (setq tidIndex (- tidIndex colCount))
+          (setq i (1+ i))
+          (setq colspec (cdr colspec))) )
     i))
 
 (defun glf-compute-font-lock-column-faces ()
@@ -279,9 +279,9 @@
     (list
 
      ;; Location
-;??     (if (eq glf-location-visibility-mode 'grayed-out)
-;??         (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
-;??       (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
+     (if (eq glf-location-visibility-mode 'grayed-out)
+         (cons (format "^[^%c][^:\r\n]+:[[:digit:]]+:.*\r?" glf-column-separator) 'glf-light-text-face)
+       (cons glf-location-pattern '((1 glf-filename-face) (2 glf-line-number-face))))
 
      ; Columns
      (cons 'glf-column-matcher (glf-compute-font-lock-column-faces))
@@ -301,7 +301,8 @@
     (goto-char (point-min))
     (if (not (looking-at-p "FILE_TYPE:"))
       (message "Broken GLF file: header not found")
-      (while (looking-at "\\([A-Z_]+\\):\\([|\\w]+\\)") ;; lines often end with garbage ^M. Ignore them
+;;;??? (while (looking-at "\\([A-Z_]+\\):\\([|\\w]+\\)") ;; lines often end with garbage ^M. Ignore them
+    (while (looking-at "\\([A-Z_]+\\):\\(.*\\)")
         (let ((name (match-string-no-properties 1))
               (value (match-string-no-properties 2)))
           (push (cons name value) header-alist)
@@ -416,10 +417,9 @@
 
 (defun glf-backward-infoline ()
   "Move to previous infoline"
-  (beginning-of-line)
-  (if (re-search-backward glf-infoline-pattern nil t)
-      (beginning-of-line)
-    (goto-char (point-min))))
+  (forward-line -1)
+  (unless (re-search-backward glf-infoline-pattern nil t)
+      (beginning-of-line)))
 
 (defun glf-sync-infoline ()
   "Move to infoline of current record"
@@ -432,6 +432,7 @@
 
 (defun glf-end-of-paragraph ()
   "Move to end of thread paragraph."
+  (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (eobp))
@@ -442,6 +443,7 @@
 
 (defun glf-beginning-of-paragraph ()
   "Move backward to start of thread paragraph."
+  (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (bobp))
@@ -462,8 +464,7 @@
     (glf-forward-infoline)
 
     (if (equal tid (glf-read-column glf-thread-index))
-        (progn (glf-end-of-paragraph)
-               (glf-backward-infoline))
+        (progn (glf-end-of-paragraph) (forward-line -1))
 
       (while (progn
                (glf-forward-infoline)
@@ -471,7 +472,7 @@
                     (not (equal tid (glf-read-column glf-thread-index))))))
       (unless (equal tid (glf-read-column glf-thread-index))
         (message "Thread %s ends here" tid)
-        (goto-char origin)))))
+        (goto-char origin)))) )
 
 (defun glf-backward-thread ()
   "Go to the previous line of same thread"
@@ -480,17 +481,14 @@
   (let ((origin (point))
         (tid (glf-read-column glf-thread-index)))
 
-    (glf-backward-infoline)
+    (while (progn
+             (glf-backward-infoline)
+             (and (not (bobp))
+                  (not (equal tid (glf-read-column glf-thread-index))))))
 
-    (if (equal tid (glf-read-column glf-thread-index))
-        (glf-beginning-of-paragraph)
-
-      (while (and (not (bobp))
-                  (not (equal tid (glf-read-column glf-thread-index))))
-        (glf-backward-infoline))
-      (unless (equal tid (glf-read-column glf-thread-index))
-        (message "Thread %s starts here" tid)
-        (goto-char origin)))))
+    (unless (equal tid (glf-read-column glf-thread-index))
+      (message "Thread %s starts here" tid)
+      (goto-char origin))))
 
 (defun glf-next-pid ()
   "Find process break"
