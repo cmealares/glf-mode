@@ -301,8 +301,7 @@
     (goto-char (point-min))
     (if (not (looking-at-p "FILE_TYPE:"))
       (message "Broken GLF file: header not found")
-;;;??? (while (looking-at "\\([A-Z_]+\\):\\([|\\w]+\\)") ;; lines often end with garbage ^M. Ignore them
-    (while (looking-at "\\([A-Z_]+\\):\\(.*\\)")
+      (while (looking-at "\\([A-Z_]+\\):\\([|\\w]+\\)") ;; lines often end with garbage ^M. Ignore them
         (let ((name (match-string-no-properties 1))
               (value (match-string-no-properties 2)))
           (push (cons name value) header-alist)
@@ -417,9 +416,10 @@
 
 (defun glf-backward-infoline ()
   "Move to previous infoline"
-  (forward-line -1)
-  (unless (re-search-backward glf-infoline-pattern nil t)
-      (beginning-of-line)))
+  (beginning-of-line)
+  (if (re-search-backward glf-infoline-pattern nil t)
+      (beginning-of-line)
+    (goto-char (point-min))))
 
 (defun glf-sync-infoline ()
   "Move to infoline of current record"
@@ -432,7 +432,6 @@
 
 (defun glf-end-of-paragraph ()
   "Move to end of thread paragraph."
-  (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (eobp))
@@ -443,7 +442,6 @@
 
 (defun glf-beginning-of-paragraph ()
   "Move backward to start of thread paragraph."
-  (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (bobp))
@@ -464,7 +462,8 @@
     (glf-forward-infoline)
 
     (if (equal tid (glf-read-column glf-thread-index))
-        (progn (glf-end-of-paragraph) (forward-line -1))
+        (progn (glf-end-of-paragraph)
+               (glf-backward-infoline))
 
       (while (progn
                (glf-forward-infoline)
@@ -481,14 +480,17 @@
   (let ((origin (point))
         (tid (glf-read-column glf-thread-index)))
 
-    (while (progn
-             (glf-backward-infoline)
-             (and (not (bobp))
-                  (not (equal tid (glf-read-column glf-thread-index))))))
+       (glf-backward-infoline)
 
+    (if (equal tid (glf-read-column glf-thread-index))
+        (glf-beginning-of-paragraph)
+
+      (while (and (not (bobp))
+                  (not (equal tid (glf-read-column glf-thread-index))))
+        (glf-backward-infoline))
     (unless (equal tid (glf-read-column glf-thread-index))
       (message "Thread %s starts here" tid)
-      (goto-char origin))))
+        (goto-char origin)))))
 
 (defun glf-next-pid ()
   "Find process break"
@@ -694,7 +696,7 @@
   (interactive
    (if (null glf-focus-overlays)
        (let ((current (progn (glf-sync-infoline) (glf-read-column glf-transaction-index))))
-         (list (read-string (format "Focus on (default %s): " current) nil nil current)));;???deprecated arg a revoir
+         (list (read-string (format "Focus on (default %s): " current) nil nil current)));;???onpeut dnner une liste de defauts
      (list nil)))
 
   (if tid
@@ -1020,9 +1022,16 @@
   (set (make-local-variable 'glf-location-overlays) nil)
   (set (make-local-variable 'glf-location-visible-p) t)
 
+  ;; improve display speed because these files are hige and cpu demanding
+  (set (make-local-variable 'scroll-conservatively) 101) ;do not recenter when cursor exits view
+  (set (make-local-variable 'mouse-wheel-scroll-amount) '(1)) ;scroll only one line
+  (set (make-local-variable 'mouse-wheel-progressive-speed) nil) ;do not accelerate scrolling
+  (set (make-variable-buffer-local 'line-number-mode) nil)
+  (set (make-variable-buffer-local 'column-number-mode) nil)
+  (set (make-variable-buffer-local 'bidi-display-reordering) nil)
+
   (when (fboundp 'jit-lock-register)
     (jit-lock-register 'glf-jit-process)))
-
 
 ;;; provide myself
 (provide 'glf-mode)
