@@ -27,10 +27,8 @@
 ;;; Main features:
 ;;
 ;;    Syntax coloration
-;;    Focus on a particular thread by hiding others
-;;    Thread navigation:
-;;      - move to next/previous thread paragraph;
-;;      - move to next/previous paragraph in same thread.
+;;    Focus on a particular transaction by hiding others
+;;    Move to next/previous paragraph in same thread.
 ;;    Collapse/expand paragraph
 ;;    Indent nested scopes
 ;;    Goto xml trace file
@@ -81,7 +79,7 @@
   :group 'glf)
 
 (defface glf-light-text
-  '((((class color) (background light)) (:foreground "Grey80"))
+  '((((class color) (background light)) (:foreground "grey56"))
     (((class color) (background dark)) (:foreground "Grey20")))
   "Text almost invisible")
 
@@ -191,6 +189,7 @@
                   ("Exception" . nil)
                   ("ProcessID" . glf-column-process-id-face)
                   ("ThreadID" . glf-column-thread-id-face)
+                  ("DSRTransaction" . glf-column-time-face)
                   ("ScopeTag" . glf-column-scope-tag-face)
                   ("Text" . (glf-get-current-thread-face)) ))
        (lockspec '()))
@@ -217,21 +216,16 @@
 
 (defun glf-compute-thread-match-data-index ()
   "Give the number of the match data of the ThreadID column. This column must exist."
-  (let ((tidIndex (gethash "ThreadID" glf-column-indexes-map))
+  (let ((tidIndex glf-thread-index)
         (i 0)
         (colspec glf-font-lock-column-specification))
 
-    (if (not tidIndex)
-        (error "Unknown column name: ThreadIndex")
-
-      (while (and colspec
-                  (> tidIndex 0))
-
+    (while (and colspec (> tidIndex 0))
         (let ((colCount (caar colspec)))
           (setq tidIndex (- tidIndex colCount))
           (setq i (1+ i))
           (setq colspec (cdr colspec))) )
-      i)))
+    i))
 
 (defun glf-compute-font-lock-column-faces ()
   (let ((res nil)
@@ -247,8 +241,7 @@
           (setq index (1+ index)))))))
 
 (defun glf-column-matcher (search-limit)
-  (let
-      ((matchlist (search-columns glf-font-lock-column-specification search-limit)))
+  (let ((matchlist (search-columns glf-font-lock-column-specification search-limit)))
     (set-match-data matchlist)
     ;; return nil for failure, t for success
     matchlist))
@@ -308,7 +301,7 @@
     (goto-char (point-min))
     (if (not (looking-at-p "FILE_TYPE:"))
       (message "Broken GLF file: header not found")
-      (while (looking-at "\\([A-Z_]+\\):\\(.*\\)")
+      (while (looking-at "\\([A-Z_]+\\):\\([|\\w]+\\)") ;; lines often end with garbage ^M. Ignore them
         (let ((name (match-string-no-properties 1))
               (value (match-string-no-properties 2)))
           (push (cons name value) header-alist)
@@ -350,6 +343,7 @@
 
       ;; pre-compute some indexes
       (set (make-local-variable 'glf-thread-index) (glf-get-index "ThreadID"))
+      (set (make-local-variable 'glf-transaction-index) (glf-get-index "DSRTransaction"))
       (set (make-local-variable 'glf-text-index) (glf-get-index "Text"))
       (set (make-local-variable 'glf-minor-depth-index) (glf-get-index "MinorDepth"))
       (set (make-local-variable 'glf-scope-tag-index) (glf-get-index "ScopeTag"))
@@ -438,7 +432,6 @@
 
 (defun glf-end-of-paragraph ()
   "Move to end of thread paragraph."
-  (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (eobp))
@@ -449,7 +442,6 @@
 
 (defun glf-beginning-of-paragraph ()
   "Move backward to start of thread paragraph."
-  (interactive)
   (glf-sync-infoline)
   (let ((tid (glf-read-column glf-thread-index)))
     (while (and (not (bobp))
@@ -479,7 +471,7 @@
                     (not (equal tid (glf-read-column glf-thread-index))))))
       (unless (equal tid (glf-read-column glf-thread-index))
         (message "Thread %s ends here" tid)
-        (goto-char origin)))))
+        (goto-char origin)))) )
 
 (defun glf-backward-thread ()
   "Go to the previous line of same thread"
@@ -488,7 +480,7 @@
   (let ((origin (point))
         (tid (glf-read-column glf-thread-index)))
 
-    (glf-backward-infoline)
+       (glf-backward-infoline)
 
     (if (equal tid (glf-read-column glf-thread-index))
         (glf-beginning-of-paragraph)
@@ -496,8 +488,8 @@
       (while (and (not (bobp))
                   (not (equal tid (glf-read-column glf-thread-index))))
         (glf-backward-infoline))
-      (unless (equal tid (glf-read-column glf-thread-index))
-        (message "Thread %s starts here" tid)
+    (unless (equal tid (glf-read-column glf-thread-index))
+      (message "Thread %s starts here" tid)
         (goto-char origin)))))
 
 (defun glf-next-pid ()
@@ -592,14 +584,14 @@
         (forward-line 1))
       (message "Indenting done: %d lines" countLines))))
 
-(defun glf-find-regions (end-function &optional start-function)
-  "make a list of pairs of region's start and end positions"
+(defun glf-find-regions (end-function start-function)
+  "Make a list of pairs of region's start and end positions"
   (let ((regions nil))
     (while (not (eobp))
       (let ((start-point (point)))
         (funcall end-function)
         (push (cons start-point (point)) regions)
-        (when start-function (funcall start-function))))
+        (funcall start-function)))
     regions))
 
 ;;;
@@ -609,7 +601,7 @@
 (defun glf-hashmap-keys (map)
   "Returns the map keys"
   (let ((result))
-    (maphash (lambda (key val) (setq result (cons key result))) map)
+    (maphash (lambda (key val) (push key result)) map)
     (sort result 'string<)))
 
 (defun glf-errors-summary ()
@@ -662,47 +654,78 @@
                   (newline)))) )))))
 
 ;;;
-;;; Thread focus
+;;; Transaction focus
 ;;;
 
-(defconst glf-invisible-thread-alist
+(defun glf-current-transaction ()
+  "Read the transaction id of the current line"
+  (save-excursion
+    (glf-sync-infoline)
+    (glf-read-column glf-transaction-index)))
+
+(defun glf-choose-transaction ()
+  (interactive)
+  (let ((choice (completing-read "Select: " (glf-list-transactions) nil nil (glf-current-transaction))))
+    (message choice)))
+
+(defun glf-list-transactions ()
+  "Get the list of the existing transactions"
+
+  (save-excursion
+    (goto-char (point-min))
+
+    (let ((transaction-map (make-hash-table :test 'equal)))
+      (while (not (eobp))
+        (glf-forward-infoline)
+        (puthash (glf-read-column glf-transaction-index) (point) transaction-map))
+
+      (remhash nil transaction-map)
+      (remhash "" transaction-map)
+
+      (let (result)
+        (maphash (lambda (key val) (push key result)) transaction-map)
+        result))))
+
+
+
+(defconst glf-invisibility-alist
   '((glf-focus . t) (invisible . t) (priority . 5)))
 
-(defun glf-toggle-thread-focus (tid)
-  "Display only the given thread or display them all if given a nil parameter"
+(defun glf-toggle-transaction-focus (tid)
+  "Display only the given transaction or display them all if given a nil parameter"
   (interactive
-   (if (null glf-thread-overlays)
-       (let ((current (progn (glf-sync-infoline) (glf-read-column glf-thread-index))))
-         (list (read-string (format "Focus on thread (default %s): " current) nil nil current)))
+   (if (null glf-focus-overlays)
+       (let ((current (progn (glf-sync-infoline) (glf-read-column glf-transaction-index))))
+         (list (read-string (format "Focus on (default %s): " current) nil nil current)));;???onpeut dnner une liste de defauts
      (list nil)))
 
   (if tid
-      (glf-thread-focus tid)
-    (glf-thread-unfocus)
-    (message "Showing all threads")))
+      (glf-transaction-focus tid)
+    (glf-transaction-unfocus)
+    (message "Showing all")))
 
-(defun glf-thread-unfocus ()
-  "Display all threads"
-  (mapc (lambda (overlay) (delete-overlay overlay)) glf-thread-overlays)
-  (setq glf-thread-overlays ()))
+(defun glf-transaction-unfocus ()
+  "Display all transactions"
+  (mapc (lambda (overlay) (delete-overlay overlay)) glf-focus-overlays)
+  (setq glf-focus-overlays ()))
 
-(defun glf-thread-focus (tid)
-  "Display only the given thread"
-  (glf-thread-unfocus)
+(defun glf-transaction-focus (tid)
+  "Display only the given transaction"
+  (glf-transaction-unfocus)
 
   (save-excursion
     (goto-char glf-end-of-header-point)
-    (glf-find-paragraph-not-on-thread tid)
+    (glf-find-paragraph-not-on-transaction tid)
 
-    (setq glf-thread-overlays
-	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-thread-alist)))
+    (setq glf-focus-overlays
+	  (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisibility-alist)))
 		  (glf-find-regions 'glf-end-of-paragraph
-				    (lambda () (glf-find-paragraph-not-on-thread tid)))))))
+				    (lambda () (glf-find-paragraph-not-on-transaction tid)))))))
 
-(defun glf-find-paragraph-not-on-thread (tid)
-  "Find the next paragraph that do not belong to the given thread or stay at current position"
+(defun glf-find-paragraph-not-on-transaction (tid)
+  "Find the next paragraph that do not belong to the given transaction or stay at current position"
   (while (and (not (eobp))
-	      (string= tid (save-excursion (glf-sync-infoline)(glf-read-column glf-thread-index))))
+	      (string= tid (save-excursion (glf-sync-infoline)(glf-read-column glf-transaction-index))))
     (glf-end-of-paragraph)))
 
 (defun glf-overlay-region (start end alist)
@@ -762,8 +785,7 @@
     (goto-char (point-min))
     (glf-forward-infoline)
     (setq glf-collapse-all-p (not glf-collapse-all-p))
-    (dolist (region (glf-find-regions 'glf-end-of-paragraph
-				      'forward-line))
+    (dolist (region (glf-find-regions 'glf-end-of-paragraph 'forward-line))
       (glf-collapse-region (car region) (cdr region) glf-collapse-all-p))))
 
 ;;;
@@ -793,8 +815,7 @@
     (glf-find-location-line)
 
     (mapcar (function (lambda (reg) (glf-overlay-region (car reg) (cdr reg) glf-invisible-location-alist)))
-	    (glf-find-regions 'forward-line
-			      'glf-find-location-line))))
+	    (glf-find-regions 'forward-line 'glf-find-location-line))))
 
 (defun glf-find-location-line ()
   (while (and (not (eobp))
@@ -954,10 +975,7 @@
     (define-key map (kbd "<C-down>")    'glf-forward-thread)
     (define-key map (kbd "<C-up>")      'glf-backward-thread)
 
-;;    (define-key map (kbd "<M-down>")    'glf-forward-thread)
-;;    (define-key map (kbd "<M-up>")      'glf-backward-thread)
-
-    (define-key map (kbd "C-c C-f")     'glf-toggle-thread-focus)
+    (define-key map (kbd "C-c C-f")     'glf-toggle-transaction-focus)
 
     (define-key map (kbd "C-c C-c")     'glf-collapse-expand)
     (define-key map (kbd "C-c C-a")     'glf-collapse-expand-all)
@@ -995,8 +1013,8 @@
   ;; indenting
   (set (make-local-variable 'indent-line-function) 'glf-indent-paragraph)
   (set (make-local-variable 'indent-region-function) 'glf-indent-region)
-  ;; thread focus
-  (set (make-local-variable 'glf-thread-overlays) nil)
+  ;; focus
+  (set (make-local-variable 'glf-focus-overlays) nil)
   ;; collapse expand
   (set (make-local-variable 'glf-collapse-all-p) nil)
   (add-to-invisibility-spec '(glf-collapse . t)) ;display as ellipsis
@@ -1004,9 +1022,16 @@
   (set (make-local-variable 'glf-location-overlays) nil)
   (set (make-local-variable 'glf-location-visible-p) t)
 
+  ;; improve display speed because these files are hige and cpu demanding
+  (set (make-local-variable 'scroll-conservatively) 101) ;do not recenter when cursor exits view
+  (set (make-local-variable 'mouse-wheel-scroll-amount) '(1)) ;scroll only one line
+  (set (make-local-variable 'mouse-wheel-progressive-speed) nil) ;do not accelerate scrolling
+  (set (make-variable-buffer-local 'line-number-mode) nil)
+  (set (make-variable-buffer-local 'column-number-mode) nil)
+  (set (make-variable-buffer-local 'bidi-display-reordering) nil)
+
   (when (fboundp 'jit-lock-register)
     (jit-lock-register 'glf-jit-process)))
-
 
 ;;; provide myself
 (provide 'glf-mode)
